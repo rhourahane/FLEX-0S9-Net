@@ -59,88 +59,6 @@ namespace FLEXNetSharp
             set { m_nSectorBias = value; }
         }
 
-        public RAW_SIR ReadRAW_SIR(Stream fs)
-        {
-            long currentPosition = fs.Position;
-
-            RAW_SIR systemInformationRecord = new RAW_SIR();
-
-            if (m_lPartitionBias >= 0)
-                fs.Seek(m_lPartitionBias + 0x0310 - (0x100 * SectorBias), SeekOrigin.Begin);     // fseek(m_fp, m_lPartitionBias + 0x0310 - (0x100 * m_nSectorBias), SEEK_SET);
-            else
-                fs.Seek(0x0210, SeekOrigin.Begin);                                                  // fseek (fs, 0x0210, SEEK_SET);
-
-            fs.Read(systemInformationRecord.caVolumeLabel, 0, 11);                          // fread (stSystemInformationRecord.caVolumeLabel      , 1, sizeof (stSystemInformationRecord.caVolumeLabel), fs);  // $50 - $5A
-            systemInformationRecord.cVolumeNumberHi     = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cVolumeNumberHi   , 1, 1, fs);      // $5B
-            systemInformationRecord.cVolumeNumberLo     = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cVolumeNumberLo   , 1, 1, fs);      // $5C
-            systemInformationRecord.cFirstUserTrack     = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cFirstUserTrack   , 1, 1, fs);      // $5D
-            systemInformationRecord.cFirstUserSector    = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cFirstUserSector  , 1, 1, fs);      // $5E
-            systemInformationRecord.cLastUserTrack      = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cLastUserTrack    , 1, 1, fs);      // $5F
-            systemInformationRecord.cLastUserSector     = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cLastUserSector   , 1, 1, fs);      // $60
-            systemInformationRecord.cTotalSectorsHi     = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cTotalSectorsHi   , 1, 1, fs);      // $61
-            systemInformationRecord.cTotalSectorsLo     = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cTotalSectorsLo   , 1, 1, fs);      // $62
-            systemInformationRecord.cMonth              = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cMonth            , 1, 1, fs);      // $63
-            systemInformationRecord.cDay                = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cDay              , 1, 1, fs);      // $64
-            systemInformationRecord.cYear               = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cYear             , 1, 1, fs);      // $65
-            systemInformationRecord.cMaxTrack           = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cMaxTrack         , 1, 1, fs);      // $66
-            systemInformationRecord.cMaxSector          = (byte)fs.ReadByte();              // fread (&stSystemInformationRecord.cMaxSector        , 1, 1, fs);      // $67
-
-            fs.Seek(currentPosition, SeekOrigin.Begin);
-
-            return systemInformationRecord;
-        }
-
-        public UniFLEX_SIR ReadUNIFLEX_SIR(Stream fs)
-        {
-            long currentPosition = fs.Position;
-
-            UniFLEX_SIR drive_SIR = new UniFLEX_SIR();
-
-            fs.Seek(512, SeekOrigin.Begin);         // fseek (fs, 512, SEEK_SET);
-
-            drive_SIR.m_supdt[0]    = (byte)fs.ReadByte();  // fread (&drive_SIR.m_supdt,  1,   1, fs);    //rmb 1       sir update flag                                         0x0200        -> 00 
-            drive_SIR.m_swprot[0]   = (byte)fs.ReadByte();  // fread (&drive_SIR.m_swprot, 1,   1, fs);    //rmb 1       mounted read only flag                                  0x0201        -> 00 
-            drive_SIR.m_slkfr[0]    = (byte)fs.ReadByte();  // fread (&drive_SIR.m_slkfr,  1,   1, fs);    //rmb 1       lock for free list manipulation                         0x0202        -> 00 
-            drive_SIR.m_slkfdn[0]   = (byte)fs.ReadByte();  // fread (&drive_SIR.m_slkfdn, 1,   1, fs);    //rmb 1       lock for fdn list manipulation                          0x0203        -> 00 
-
-            fs.Read(drive_SIR.m_sintid, 0, 4);              // fread (&drive_SIR.m_sintid, 1,   4, fs);    //rmb 4       initializing system identifier                          0x0204        -> 00 
-
-            fs.Read(drive_SIR.m_scrtim, 0, 4);              // fread (&drive_SIR.m_scrtim, 1,   4, fs);    //rmb 4       creation time                                           0x0208        -> 11 44 F3 FC
-            fs.Read(drive_SIR.m_sutime, 0, 4);              // fread (&drive_SIR.m_sutime, 1,   4, fs);    //rmb 4       date of last update                                     0x020C        -> 11 44 F1 51
-            fs.Read(drive_SIR.m_sszfdn, 0, 2);              // fread (&drive_SIR.m_sszfdn, 1,   2, fs);    //rmb 2       size in blocks of fdn list                              0x0210        -> 00 4A          = 74
-            fs.Read(drive_SIR.m_ssizfr, 0, 3);              // fread (&drive_SIR.m_ssizfr, 1,   3, fs);    //rmb 3       size in blocks of volume                                0x0212        -> 00 08 1F       = 2079
-            fs.Read(drive_SIR.m_sfreec, 0, 3);              // fread (&drive_SIR.m_sfreec, 1,   3, fs);    //rmb 3       total free blocks                                       0x0215        -> 00 04 9C       = 
-            fs.Read(drive_SIR.m_sfdnc , 0, 2);              // fread (&drive_SIR.m_sfdnc,  1,   2, fs);    //rmb 2       free fdn count                                          0x0218        -> 01 B0
-            fs.Read(drive_SIR.m_sfname, 0, 14);             // fread (&drive_SIR.m_sfname, 1,  14, fs);    //rmb 14      file system name                                        0x021A        -> 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
-            fs.Read(drive_SIR.m_spname, 0, 14);             // fread (&drive_SIR.m_spname, 1,  14, fs);    //rmb 14      file system pack name                                   0x0228        -> 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
-            fs.Read(drive_SIR.m_sfnumb, 0, 2);              // fread (&drive_SIR.m_sfnumb, 1,   2, fs);    //rmb 2       file system number                                      0x0236        -> 00 00
-            fs.Read(drive_SIR.m_sflawc, 0, 2);              // fread (&drive_SIR.m_sflawc, 1,   2, fs);    //rmb 2       flawed block count                                      0x0238        -> 00 00
-
-
-            drive_SIR.m_sdenf[0] = (byte)fs.ReadByte();     // fread (&drive_SIR.m_sdenf,  1,   1, fs);    //rmb 1       density flag - 0=single                                 0x023A        -> 01
-            drive_SIR.m_ssidf[0] = (byte)fs.ReadByte();     // fread (&drive_SIR.m_ssidf,  1,   1, fs);    //rmb 1       side flag - 0=single                                    0x023B        -> 01
-
-            fs.Read(drive_SIR.m_sswpbg, 0, 3);              // fread (&drive_SIR.m_sswpbg, 1,   3, fs);    //rmb 3       swap starting block number                              0x023C        -> 00 08 20
-            fs.Read(drive_SIR.m_sswpsz, 0, 2);              // fread (&drive_SIR.m_sswpsz, 1,   2, fs);    //rmb 2       swap block count                                        0x023F        -> 01 80
-
-            drive_SIR.m_s64k[0] = (byte)fs.ReadByte();      // fread (&drive_SIR.m_s64k,   1,   1, fs);    //rmb 1       non-zero if swap block count is multiple of 64K         0x0241        -> 00
-
-            fs.Read(drive_SIR.m_swinc, 0, 11);              // fread (&drive_SIR.m_swinc,  1,  11, fs);    //rmb 11      Winchester configuration info                           0x0242        -> 00 00 00 00 00 00 2A 00 99 00 9A
-            fs.Read(drive_SIR.m_sspare, 0, 11);             // fread (&drive_SIR.m_sspare, 1,  11, fs);    //rmb 11      spare bytes - future use                                0x024D        -> 00 9B 00 9C 00 9D 00 9E 00 9F 00
-
-            drive_SIR.m_snfdn[0] = (byte)fs.ReadByte();     // fread (&drive_SIR.m_snfdn,  1,   1, fs);    //rmb 1       number of in core fdns                                  0x0278        -> A0     *snfdn * 2 = 320
-
-            fs.Read(drive_SIR.m_scfdn, 0, 169);             // fread (&drive_SIR.m_scfdn,  1, 160, fs);    //rmb CFDN*2  in core free fdns                                       0x0279        variable (*snfdn * 2)
-
-            drive_SIR.m_snfree[0] = (byte)fs.ReadByte();    // fread (&drive_SIR.m_snfree, 1,   1, fs);    //rmb 1       number of in core free blocks                           0x03B9        -> 03
-
-            fs.Read(drive_SIR.m_sfree, 0, 300);             // fread (&drive_SIR.m_sfree,  1, 300, fs);    //rmb         CDBLKS*DSKADS in core free blocks                       0x03BA        -> 
-
-            fs.Seek(currentPosition, SeekOrigin.Begin);
-
-            return drive_SIR;
-        }
-
         public uint ConvertToInt16(byte[] value)
         {
             return (uint)(value[0] * 256) + (uint)(value[1]);
@@ -166,21 +84,7 @@ namespace FLEXNetSharp
                 long fileLength = fs.Length;        // int fd = _fileno (fs);   long fileLength = _filelength(fd);
 
                 // First Check for OS9 format
-
-                OS9_ID_SECTOR stIDSector = new OS9_ID_SECTOR();
-
-                fs.Seek(0, SeekOrigin.Begin);
-
-                stIDSector.cTOT[0] = (byte)fs.ReadByte();         // fread (&stIDSector.cTOT[0], 1, 1, fs);   // Total Number of sector on media
-                stIDSector.cTOT[1] = (byte)fs.ReadByte();         // fread (&stIDSector.cTOT[1], 1, 1, fs);
-                stIDSector.cTOT[2] = (byte)fs.ReadByte();         // fread (&stIDSector.cTOT[2], 1, 1, fs);
-                stIDSector.cTKS[0] = (byte)fs.ReadByte();         // fread (&stIDSector.cTKS[0], 1, 1, fs);   // Sectors Per Track (not track 0)
-
-                fs.Seek(16, SeekOrigin.Begin);                    // fseek(fs, 16, SEEK_SET);
-
-                stIDSector.cFMT[0] = (byte)fs.ReadByte();         // fread (&stIDSector.cFMT[0], 1, 1, fs);     // Disk Format Byte
-                stIDSector.cSPT[0] = (byte)fs.ReadByte();         // fread (&stIDSector.cSPT[0], 1, 1, fs);     // Sectors per track on track 0 high byte
-                stIDSector.cSPT[1] = (byte)fs.ReadByte();         // fread (&stIDSector.cSPT[1], 1, 1, fs);     // Sectors per track on track 0 low  byte
+                OS9_ID_SECTOR stIDSector = new OS9_ID_SECTOR(fs);
 
                 // There's no point in going any further if the file size if not right
 
@@ -202,7 +106,7 @@ namespace FLEXNetSharp
                     int nMaxSector;
                     int nMaxTrack;
 
-                    RAW_SIR stSystemInformationRecord = ReadRAW_SIR(fs);
+                    RAW_SIR stSystemInformationRecord = new RAW_SIR(fs, m_lPartitionBias, m_nSectorBias);
 
                     nMaxSector = stSystemInformationRecord.cMaxSector;
                     nMaxTrack = stSystemInformationRecord.cMaxTrack;
@@ -218,9 +122,8 @@ namespace FLEXNetSharp
                     }
                     else
                     {
-                        UniFLEX_SIR drive_SIR = ReadUNIFLEX_SIR(fs);
+                        UniFLEX_SIR drive_SIR = new UniFLEX_SIR(fs);
 
-                        uint nFDNSize = ConvertToInt16(drive_SIR.m_sszfdn);
                         uint nVolumeSize = ConvertToInt24(drive_SIR.m_ssizfr);
                         uint nSwapSize = ConvertToInt16(drive_SIR.m_sswpsz);
 
@@ -232,18 +135,15 @@ namespace FLEXNetSharp
                         else
                         {
                             // see if this an IDE drive with multiple partitions
-
                             if ((fileLength % 256) > 0)
                             {
                                 // could be - get the drive info and see if it makes sence
-
                                 byte[] cInfoSize = new byte[2];
-                                uint nInfoSize = 0;
 
-                                fs.Seek(-2, SeekOrigin.End);            // (fs, -2, SEEK_END);
-                                fs.Read(cInfoSize, 0, 2);               // fread (cInfoSize, 1, 2, fs);
+                                fs.Seek(-2, SeekOrigin.End);
+                                fs.Read(cInfoSize, 0, 2);
 
-                                nInfoSize = ConvertToInt16(cInfoSize);
+                                uint nInfoSize = ConvertToInt16(cInfoSize);
                                 if (nInfoSize == (fileLength % 256))
                                 {
                                     ff = FileFormat.fileformat_FLEX_IDE;
@@ -413,38 +313,7 @@ namespace FLEXNetSharp
 
                         case FileFormat.fileformat_OS9:
                             {
-                                OS9_ID_SECTOR stIDSector = new OS9_ID_SECTOR();
-
-                                // Point to DD_TOT
-
-                                imageFile[nDrive].stream.Seek(0, SeekOrigin.Begin);
-
-                                stIDSector.cTOT[0] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cTOT[0], 1, 1, fs);   // Total Number of sector on media
-                                stIDSector.cTOT[1] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cTOT[1], 1, 1, fs);
-                                stIDSector.cTOT[2] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cTOT[2], 1, 1, fs);
-                                stIDSector.cTKS[0] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cTKS[0], 1, 1, fs);   // Sectors Per Track (not track 0)
-
-                                // point to DD_BIT
-
-                                imageFile[nDrive].stream.Seek(6, SeekOrigin.Begin);                    // fseek(fs, 6, SEEK_SET);
-
-                                stIDSector.cBIT[0] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cBIT[0], 1, 1, fs);     // cluster size high byte
-                                stIDSector.cBIT[1] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cBIT[1], 1, 1, fs);     // cluster size low  byte
-
-                                // POINT to DD_FMT
-
-                                imageFile[nDrive].stream.Seek(16, SeekOrigin.Begin);                    // fseek(fs, 0x10, SEEK_SET);
-
-                                stIDSector.cFMT[0] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cFMT[0], 1, 1, fs);     // Disk Format Byte
-                                stIDSector.cSPT[0] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cSPT[0], 1, 1, fs);     // Sectors per track on track 0 high byte
-                                stIDSector.cSPT[1] = (byte)imageFile[nDrive].stream.ReadByte();         // fread (&stIDSector.cSPT[1], 1, 1, fs);     // Sectors per track on track 0 low  byte
-
-                                // POINT to DD_LSNSize
-
-                                imageFile[nDrive].stream.Seek(0x68, SeekOrigin.Begin);                    // fseek(fs, 0x68, SEEK_SET);
-
-                                stIDSector.cLSS[0] = (byte)imageFile[nDrive].stream.ReadByte();
-                                stIDSector.cLSS[1] = (byte)imageFile[nDrive].stream.ReadByte();
+                                OS9_ID_SECTOR stIDSector = new OS9_ID_SECTOR(imageFile[nDrive].stream);
 
                                 // There's no point in going any further if the file size if not right
 

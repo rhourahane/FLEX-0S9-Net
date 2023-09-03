@@ -57,21 +57,6 @@ enum CREATE_STATE
     GET_CREATE_SECTOR_COUNT,
     CREATE_THE_IMAGE
 };
-public class blockList
-{
-    public byte[] block = new byte[3];
-}
-public class fdn
-{
-    public byte[] m_mode      = new byte[1];    //  file mode
-    public byte[] m_perms     = new byte[1];    //  file security
-    public byte[] m_links     = new byte[1];    //  number of links
-    public byte[] m_owner     = new byte[2];    //  file owner's ID
-    public byte[] m_size      = new byte[4];    //  file size
-    public blockList[] m_blks = new blockList[13];   //  block list
-    public byte[] m_time      = new byte[4];    //  file time
-    public byte[] m_fd_pad    = new byte[12];   //  padding
-}
 public enum FileFormat
 {
     fileformat_UNKNOWN = -1,

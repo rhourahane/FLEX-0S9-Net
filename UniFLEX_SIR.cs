@@ -1,4 +1,6 @@
-﻿public class UniFLEX_SIR
+﻿using System.IO;
+
+public class UniFLEX_SIR
 {
     public byte[] m_supdt  = new byte[1];        //rmb 1       sir update flag                                         0x0200        -> 00 
     public byte[] m_swprot = new byte[1];        //rmb 1       mounted read only flag                                  0x0201        -> 00 
@@ -27,5 +29,55 @@
     public byte[] m_snfree = new byte[1];        //rmb 1       number of in core free blocks                           0x03B9        -> 03
     public byte[] m_sfree  = new byte[16384];    //rmb         CDBLKS*DSKADS in core free blocks                       0x03BA        -> 
 
-    public fdn[] m_fdn = new fdn[592];
+    public UniFLEX_SIR(Stream fs)
+    {
+        ReadFromStream(fs);
+    }
+
+    public void ReadFromStream(Stream fs)
+    {
+        long currentPosition = fs.Position;
+
+        fs.Seek(512, SeekOrigin.Begin);
+
+        m_supdt[0] = (byte)fs.ReadByte();
+        m_swprot[0] = (byte)fs.ReadByte();
+        m_slkfr[0] = (byte)fs.ReadByte();
+        m_slkfdn[0] = (byte)fs.ReadByte();
+
+        fs.Read(m_sintid, 0, 4);
+
+        fs.Read(m_scrtim, 0, 4);
+        fs.Read(m_sutime, 0, 4);
+        fs.Read(m_sszfdn, 0, 2);
+        fs.Read(m_ssizfr, 0, 3);
+        fs.Read(m_sfreec, 0, 3);
+        fs.Read(m_sfdnc, 0, 2);
+        fs.Read(m_sfname, 0, 14);
+        fs.Read(m_spname, 0, 14);
+        fs.Read(m_sfnumb, 0, 2);
+        fs.Read(m_sflawc, 0, 2);
+
+        m_sdenf[0] = (byte)fs.ReadByte();
+        m_ssidf[0] = (byte)fs.ReadByte();
+
+        fs.Read(m_sswpbg, 0, 3);
+        fs.Read(m_sswpsz, 0, 2);
+
+        m_s64k[0] = (byte)fs.ReadByte();
+
+        fs.Read(m_swinc, 0, 11);
+        fs.Read(m_sspare, 0, 11);
+
+        m_snfdn[0] = (byte)fs.ReadByte();
+
+        fs.Read(m_scfdn, 0, 169);
+
+        m_snfree[0] = (byte)fs.ReadByte();
+
+        fs.Read(m_sfree, 0, 300);
+
+        fs.Seek(currentPosition, SeekOrigin.Begin);
+    }
+
 }

@@ -1,4 +1,6 @@
-﻿public class OS9_ID_SECTOR
+﻿using System.IO;
+
+public class OS9_ID_SECTOR
 {
     public byte[] cTOT = new byte[3];      // Total Number of sector on media
     public byte[] cTKS = new byte[1];      // Number of tracks
@@ -16,7 +18,44 @@
     public byte[] cDAT = new byte[5];      // Time of creation Y:M:D:H:M
     public byte[] cNAM = new byte[32];     // Volume name (last char has sign bit set)
 
-    // ...
-
     public byte[] cLSS = new byte[2];       // logical sector size at offset 0x68
+
+    public OS9_ID_SECTOR(Stream fs)
+    {
+        ReadFromStream(fs);
+    }
+
+    public void ReadFromStream(Stream fs)
+    {
+        long currentPosition = fs.Position;
+
+        // Point to DD_TOT
+        fs.Seek(0, SeekOrigin.Begin);
+
+        cTOT[0] = (byte)fs.ReadByte();
+        cTOT[1] = (byte)fs.ReadByte();
+        cTOT[2] = (byte)fs.ReadByte();
+        cTKS[0] = (byte)fs.ReadByte();
+
+        // point to DD_BIT
+        fs.Seek(6, SeekOrigin.Begin);
+
+        cBIT[0] = (byte)fs.ReadByte();
+        cBIT[1] = (byte)fs.ReadByte();
+
+        // POINT to DD_FMT
+        fs.Seek(16, SeekOrigin.Begin);
+
+        cFMT[0] = (byte)fs.ReadByte();
+        cSPT[0] = (byte)fs.ReadByte();
+        cSPT[1] = (byte)fs.ReadByte();
+
+        // POINT to DD_LSNSize
+        fs.Seek(0x68, SeekOrigin.Begin);
+
+        cLSS[0] = (byte)fs.ReadByte();
+        cLSS[1] = (byte)fs.ReadByte();
+
+        fs.Seek(currentPosition, SeekOrigin.Begin);
+    }
 }

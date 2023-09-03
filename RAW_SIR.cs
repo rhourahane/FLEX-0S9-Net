@@ -1,28 +1,11 @@
 ﻿using System;
+using System.IO;
 // [Serializable()]
 public class RAW_SIR
 {
     public const int sizeofVolumeLabel = 11;
     public const int sizeofDirEntry = 24;
     public const int sizeofSystemInformationRecord = 24;
-
-    public RAW_SIR()
-    {
-        Array.Clear(caVolumeLabel, 0, caVolumeLabel.Length);
-        cVolumeNumberHi  = 0x00;
-        cVolumeNumberLo  = 0x00;
-        cFirstUserTrack  = 0x00;
-        cFirstUserSector = 0x00;
-        cLastUserTrack   = 0x00;
-        cLastUserSector  = 0x00;
-        cTotalSectorsHi  = 0x00;
-        cTotalSectorsLo  = 0x00;
-        cMonth           = 0x00;
-        cDay             = 0x00;
-        cYear            = 0x00;
-        cMaxTrack        = 0x00;
-        cMaxSector       = 0x00;
-    }
 
     public byte[] caVolumeLabel = new byte[sizeofVolumeLabel];    // $50 - $5A
     public byte cVolumeNumberHi;                    // $5B
@@ -38,4 +21,38 @@ public class RAW_SIR
     public byte cYear;                              // $65
     public byte cMaxTrack;                          // $66
     public byte cMaxSector;                         // $67
+
+
+    public RAW_SIR(Stream fs, long partitionBias, int sectorBias)
+    {
+        ReadFromStream(fs, partitionBias, sectorBias);
+    }
+
+    public void ReadFromStream(Stream fs, long partitionBias, int sectorBias)
+    {
+        long currentPosition = fs.Position;
+
+        if (partitionBias >= 0)
+            fs.Seek(partitionBias + 0x0310 - (0x100 * sectorBias), SeekOrigin.Begin);
+        else
+            fs.Seek(0x0210, SeekOrigin.Begin);
+
+        fs.Read(caVolumeLabel, 0, 11);
+        cVolumeNumberHi = (byte)fs.ReadByte();
+        cVolumeNumberLo = (byte)fs.ReadByte();
+        cFirstUserTrack = (byte)fs.ReadByte();
+        cFirstUserSector = (byte)fs.ReadByte();
+        cLastUserTrack = (byte)fs.ReadByte();
+        cLastUserSector = (byte)fs.ReadByte();
+        cTotalSectorsHi = (byte)fs.ReadByte();
+        cTotalSectorsLo = (byte)fs.ReadByte();
+        cMonth = (byte)fs.ReadByte();
+        cDay = (byte)fs.ReadByte();
+        cYear = (byte)fs.ReadByte();
+        cMaxTrack = (byte)fs.ReadByte();
+        cMaxSector = (byte)fs.ReadByte();
+
+        fs.Seek(currentPosition, SeekOrigin.Begin);
+    }
+
 }
