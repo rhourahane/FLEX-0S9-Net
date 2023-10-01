@@ -25,6 +25,21 @@ public class OS9_ID_SECTOR
         ReadFromStream(fs);
     }
 
+    public int DiskSize
+    {
+        get
+        {
+            int nSectorsPerTrack = (int)cTKS[0];
+            int nSectorsPerTrackZero = cSPT[1] + (cSPT[0] * 256);
+            int nTotalSectors = cTOT[2] + (cTOT[1] * 256) + (cTOT[0] * 1024);
+
+            int nDiskSize = nTotalSectors * 256;
+            nDiskSize += (nSectorsPerTrack - nSectorsPerTrackZero) * 256;
+
+            return nDiskSize;
+        }
+    }
+
     public void ReadFromStream(Stream fs)
     {
         long currentPosition = fs.Position;

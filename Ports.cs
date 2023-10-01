@@ -20,9 +20,6 @@ namespace FLEXNetSharp
         public string       dirFilename;
         public int          currentDrive = 0;
 
-        public int[] track = new int[4];
-        public int[] sector = new int[4];
-
         public int sectorIndex = 0;
         public int calculatedCRC = 0;
 
@@ -59,14 +56,14 @@ namespace FLEXNetSharp
             set { m_nSectorBias = value; }
         }
 
-        public uint ConvertToInt16(byte[] value)
+        public int ConvertMSBToInt16(byte[] value)
         {
-            return (uint)(value[0] * 256) + (uint)(value[1]);
+            return (value[0] * 256) + value[1];
         }
 
-        public uint ConvertToInt24(byte[] value)
+        public int ConvertMSBToInt24(byte[] value)
         {
-            return (uint)(value[0] * 256 * 256) + (uint)(value[1] * 256) + (uint)(value[2]);
+            return (value[0] * 256 * 256) + (value[1] * 256) + value[2];
         }
 
         /// <summary>
@@ -81,19 +78,13 @@ namespace FLEXNetSharp
             if (fs != null)
             {
                 long currentPosition = fs.Position;
-                long fileLength = fs.Length;        // int fd = _fileno (fs);   long fileLength = _filelength(fd);
+                long fileLength = fs.Length;
 
                 // First Check for OS9 format
                 OS9_ID_SECTOR stIDSector = new OS9_ID_SECTOR(fs);
 
                 // There's no point in going any further if the file size if not right
-
-                int nSectorsPerTrack = (int)stIDSector.cTKS[0];
-                int nSectorsPerTrackZero = stIDSector.cSPT[1] + (stIDSector.cSPT[0] * 256);
-                int nTotalSectors = stIDSector.cTOT[2] + (stIDSector.cTOT[1] * 256) + (stIDSector.cTOT[0] * 1024);
-
-                long nDiskSize = (long)(nTotalSectors * 256);
-                nDiskSize += (long)((nSectorsPerTrack - nSectorsPerTrackZero) * 256);
+                int nDiskSize = stIDSector.DiskSize;
 
                 if (nDiskSize == (fileLength & 0xFFFFFF00))
                 {
@@ -103,16 +94,9 @@ namespace FLEXNetSharp
                 }
                 else
                 {
-                    int nMaxSector;
-                    int nMaxTrack;
-
                     RAW_SIR stSystemInformationRecord = new RAW_SIR(fs, m_lPartitionBias, m_nSectorBias);
 
-                    nMaxSector = stSystemInformationRecord.cMaxSector;
-                    nMaxTrack = stSystemInformationRecord.cMaxTrack;
-                    nTotalSectors = stSystemInformationRecord.cTotalSectorsHi * 256 + stSystemInformationRecord.cTotalSectorsLo;
-
-                    nDiskSize = (long)(nMaxTrack + 1) * (long)nMaxSector * (long)256;   // Track is 0 based, sector is 1 based
+                    nDiskSize = stSystemInformationRecord.DiskSize;
 
                     if (nDiskSize == (fileLength & 0xFFFFFF00))
                     {
@@ -124,8 +108,8 @@ namespace FLEXNetSharp
                     {
                         UniFLEX_SIR drive_SIR = new UniFLEX_SIR(fs);
 
-                        uint nVolumeSize = ConvertToInt24(drive_SIR.m_ssizfr);
-                        uint nSwapSize = ConvertToInt16(drive_SIR.m_sswpsz);
+                        int nVolumeSize = ConvertMSBToInt24(drive_SIR.m_ssizfr);
+                        int nSwapSize = ConvertMSBToInt16(drive_SIR.m_sswpsz);
 
                         nDiskSize = (nVolumeSize + nSwapSize + 1) * 512;
                         if (nDiskSize == (fileLength & 0xFFFFFF00))
@@ -143,7 +127,7 @@ namespace FLEXNetSharp
                                 fs.Seek(-2, SeekOrigin.End);
                                 fs.Read(cInfoSize, 0, 2);
 
-                                uint nInfoSize = ConvertToInt16(cInfoSize);
+                                int nInfoSize = ConvertMSBToInt16(cInfoSize);
                                 if (nInfoSize == (fileLength % 256))
                                 {
                                     ff = FileFormat.fileformat_FLEX_IDE;
@@ -256,8 +240,6 @@ namespace FLEXNetSharp
         public byte MountImageFile(string fileName, int nDrive)
         {
             byte c = 0x06;
-            string Message = "";
-
             try
             {
                 Directory.SetCurrentDirectory(currentWorkingDirectory);
@@ -287,9 +269,11 @@ namespace FLEXNetSharp
                     }
                 }
 
+                string Message;
+                bool isPathFullyQualified = Path.IsPathFullyQualified(fileToLoad);
                 if (c == 0x06)
                 {
-                    if (fileToLoad.Substring(1, 1) == ":")
+                    if (isPathFullyQualified)
                     {
                         Message = string.Format("Loaded imagefile {0} from directory {1}", fileToLoad.PadRight(16), Directory.GetParent(fileToLoad));
                     }
@@ -317,20 +301,20 @@ namespace FLEXNetSharp
 
                                 // There's no point in going any further if the file size if not right
 
-                                int nSectorsPerTrack        = stIDSector.cSPT[1] + (stIDSector.cSPT[0] * 256);
-                                int nSectorsPerTrackZero    = stIDSector.cSPT[1] + (stIDSector.cSPT[0] * 256);
-                                int nTotalSectors           = stIDSector.cTOT[2] + (stIDSector.cTOT[1] * 256) + (stIDSector.cTOT[0] * 1024);
-                                int nClusterSize            = stIDSector.cBIT[1] + (stIDSector.cBIT[0] * 256);
-                                int nLogicalSectorSize      = stIDSector.cLSS[1] + (stIDSector.cLSS[0] * 256);
+                                int nSectorsPerTrack = stIDSector.cSPT[1] + (stIDSector.cSPT[0] * 256);
+                                int nSectorsPerTrackZero = stIDSector.cSPT[1] + (stIDSector.cSPT[0] * 256);
+                                int nTotalSectors = stIDSector.cTOT[2] + (stIDSector.cTOT[1] * 256) + (stIDSector.cTOT[0] * 1024);
+                                int nClusterSize = stIDSector.cBIT[1] + (stIDSector.cBIT[0] * 256);
+                                int nLogicalSectorSize = stIDSector.cLSS[1] + (stIDSector.cLSS[0] * 256);
 
                                 long nDiskSize = (long)(nTotalSectors * 256);
                                 nDiskSize += (long)((nSectorsPerTrack - nSectorsPerTrackZero) * 256);
 
-                                imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack     = nSectorsPerTrack;
-                                imageFile[nDrive].driveInfo.TotalNumberOfSectorOnMedia  = nTotalSectors;
-                                imageFile[nDrive].driveInfo.NumberOfBytesPerTrack       = nSectorsPerTrack * (nLogicalSectorSize + 1) * 256;
-                                imageFile[nDrive].driveInfo.NumberOfSectorsPerCluster   = nClusterSize;
-                                imageFile[nDrive].driveInfo.LogicalSectorSize           = nLogicalSectorSize;       // 0 = 256 bytes per sector
+                                imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack = nSectorsPerTrack;
+                                imageFile[nDrive].driveInfo.TotalNumberOfSectorOnMedia = nTotalSectors;
+                                imageFile[nDrive].driveInfo.NumberOfBytesPerTrack = nSectorsPerTrack * (nLogicalSectorSize + 1) * 256;
+                                imageFile[nDrive].driveInfo.NumberOfSectorsPerCluster = nClusterSize;
+                                imageFile[nDrive].driveInfo.LogicalSectorSize = nLogicalSectorSize;       // 0 = 256 bytes per sector
                             }
                             break;
 
@@ -338,16 +322,16 @@ namespace FLEXNetSharp
                             break;
                     }
 
-                    if (fileToLoad.Substring(1, 1) == ":")
+                    if (isPathFullyQualified)
                         imageFile[nDrive].driveInfo.MountedFilename = fileToLoad;
                     else
-                        imageFile[nDrive].driveInfo.MountedFilename = currentWorkingDirectory + "/" + fileToLoad;
+                        imageFile[nDrive].driveInfo.MountedFilename = Path.Combine(currentWorkingDirectory, fileToLoad);
 
                     imageFile[nDrive].driveInfo.MountedFilename = imageFile[nDrive].driveInfo.MountedFilename.ToUpper();
                 }
                 else
                 {
-                    if (fileToLoad.Substring(1, 1) == ":")
+                    if (isPathFullyQualified)
                     {
                         Message = string.Format("Unable to load {0} from directory {1}", fileToLoad.PadRight(16), Directory.GetParent(fileToLoad));
                     }
@@ -392,12 +376,12 @@ namespace FLEXNetSharp
                 {
                     case FileFormat.fileformat_FLEX:    
                         {
-                            lOffsetToStartOfTrack = ((long)track[currentDrive] * imageFile[currentDrive].driveInfo.NumberOfBytesPerTrack);
+                            lOffsetToStartOfTrack = (imageFile[currentDrive].track * imageFile[currentDrive].driveInfo.NumberOfBytesPerTrack);
 
-                            if (sector[currentDrive] == 0)
-                                lOffsetFromTrackStartToSector = (long)sector[currentDrive] * 256L;
+                            if (imageFile[currentDrive].sector == 0)
+                                lOffsetFromTrackStartToSector = (long)imageFile[currentDrive].sector * 256L;
                             else
-                                lOffsetFromTrackStartToSector = (long)(sector[currentDrive] - 1) * 256L;
+                                lOffsetFromTrackStartToSector = (long)(imageFile[currentDrive].sector - 1) * 256L;
 
                             lSectorOffset = lOffsetToStartOfTrack + lOffsetFromTrackStartToSector;
 
@@ -409,7 +393,7 @@ namespace FLEXNetSharp
                         {
                             // we need to convert the track and sector as LBN to Track and Sector to be able to calculate the offset used to access the diskette image sector
 
-                            int lbn = (track[currentDrive] * 256) + sector[currentDrive];
+                            int lbn = (imageFile[currentDrive].track * 256) + imageFile[currentDrive].sector;
 
                             try
                             {
@@ -422,7 +406,7 @@ namespace FLEXNetSharp
 
                                 lOffsetToStartOfTrack = ((long)_track * imageFile[currentDrive].driveInfo.NumberOfBytesPerTrack);
 
-                                if (sector[currentDrive] == 0)
+                                if (imageFile[currentDrive].sector == 0)
                                     lOffsetFromTrackStartToSector = (long)_sector * 256L;
                                 else
                                     lOffsetFromTrackStartToSector = (long)(_sector - 1) * 256L;
@@ -460,7 +444,7 @@ namespace FLEXNetSharp
                         break;
                 }
 
-                lSectorOffset = ((imageFile[currentDrive].driveInfo.LogicalSectorSize + 1) * 256) * (track[currentDrive] * 256 + sector[currentDrive]);
+                lSectorOffset = ((imageFile[currentDrive].driveInfo.LogicalSectorSize + 1) * 256) * (imageFile[currentDrive].track * 256 + imageFile[currentDrive].sector);
                 Console.Write("[" + lSectorOffset.ToString("X8") + "]");
             }
 

@@ -22,6 +22,16 @@ public class RAW_SIR
     public byte cMaxTrack;                          // $66
     public byte cMaxSector;                         // $67
 
+    public int DiskSize
+    {
+        get
+        {
+            var nMaxSector = cMaxSector;
+            var nMaxTrack = cMaxTrack;
+
+            return (nMaxTrack + 1) * (int)nMaxSector * 256;   // Track is 0 based, sector is 1 based
+        }
+    }
 
     public RAW_SIR(Stream fs, long partitionBias, int sectorBias)
     {

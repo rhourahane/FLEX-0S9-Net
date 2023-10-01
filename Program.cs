@@ -8,6 +8,7 @@ using System.Xml;
 using System.IO;
 using System.IO.Ports;
 using System.Reflection;
+using System.Linq;
 
 enum CONSOLE_ATTRIBUTE
 {
@@ -70,15 +71,15 @@ namespace FLEXNetSharp
 {
     public class DriveInfo
     {
-        public int      mode;
-        public string   MountedFilename;
-        public int      NumberOfTracks;
-        public byte[]   cNumberOfSectorsPerTrack = new byte[1];
-        public long     NumberOfBytesPerTrack;
-        public long     NumberOfSectorsPerTrack;
-        public int      NumberOfSectorsPerCluster;
-        public long     TotalNumberOfSectorOnMedia;
-        public int      LogicalSectorSize;
+        public int mode;
+        public string MountedFilename;
+        //public int      NumberOfTracks;
+        public byte[] cNumberOfSectorsPerTrack = new byte[1];
+        public long NumberOfBytesPerTrack;
+        public long NumberOfSectorsPerTrack;
+        public int NumberOfSectorsPerCluster;
+        public long TotalNumberOfSectorOnMedia;
+        public int LogicalSectorSize;
     }
 
     public class ImageFile
@@ -89,25 +90,18 @@ namespace FLEXNetSharp
         public DriveInfo  driveInfo = new DriveInfo();
         public FileFormat fileFormat;
         public bool trackAndSectorAreTrackAndSector = true;
+        public int track;
+        public int sector;
     }
 
     class Program
     {
-        //int             nNumberOfPorts;
-        //int             FocusWindow = -1;
-        //int             Done        = 0;
-        //int             Helping     = 1;
-
         public static bool verboseOutput;
 
         static string shutDown;
         static bool done = false;
-
-        //long            NextStatusUpdate = 0;
-
         static List<Ports> listPorts = new List<Ports>();
         static ArrayList ports = new ArrayList();
-
         static CultureInfo ci = new CultureInfo("en-us");
 
         static void ParseConfigFile()
@@ -320,67 +314,59 @@ namespace FLEXNetSharp
 
                 if (serialPort.streamDir != null)
                 {
-                    serialPort.streamDir.Close();
+                    serialPort.streamDir.Dispose();
                     serialPort.streamDir = null;
                     File.Delete(serialPort.dirFilename);
                 }
-                serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
 
-                // Get the drive and volume information
-
-                System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
-                long availableFreeSpace = driveInfo.AvailableFreeSpace;
-                string driveName = driveInfo.Name;
-                string volumeLabel = driveInfo.VolumeLabel;
-
-                byte[] volumeBuffer = Encoding.ASCII.GetBytes("\r\n Volume in Drive " + driveName + " is " + volumeLabel + "\r\n");
-                serialPort.streamDir.Write(volumeBuffer, 0, volumeBuffer.Length);
-                Console.WriteLine("\r\n Volume in Drive " + driveName + " is " + volumeLabel);
-
-                byte[] wrkDirBuffer = Encoding.ASCII.GetBytes(serialPort.currentWorkingDirectory + "\r\n\r\n");
-                serialPort.streamDir.Write(wrkDirBuffer, 0, wrkDirBuffer.Length);
-                Console.WriteLine(serialPort.currentWorkingDirectory + "\r\n");
-
-                // get the list of directories in the current working directory
-
-                string[] files = Directory.GetDirectories(serialPort.currentWorkingDirectory);
-
-                int maxFilenameSize = 0;
-                foreach (string file in files)
+                using (var fileStream = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
                 {
-                    if (file.Length > maxFilenameSize)
-                        maxFilenameSize = file.Length;
-                }
-                maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
-
-                int fileCount = 0;
-                foreach (string file in files)
-                {
-                    FileInfo fi = new FileInfo(file);
-                    DateTime fCreation = fi.CreationTime;
-
-                    string fileInfoLine = file;
-                    fileInfoLine = fileInfoLine.Replace(serialPort.currentWorkingDirectory + @"\", ""); // get rid of path info
-                    fileInfoLine = fileInfoLine.PadRight(maxFilenameSize, ' ');                         // pad to proper length
-                    fileInfoLine = fileInfoLine + "    <DIR>   " +
-                                                  fCreation.Month.ToString("00") + "/" + fCreation.Day.ToString("00") + "/" + fCreation.Year.ToString("0000") +
-                                                  " " +
-                                                  fCreation.Hour.ToString("00") + ":" + fCreation.Minute.ToString("00") + ":" + fCreation.Second.ToString("00") +
-                                                  "\r\n";
-                    if (fileInfoLine.Length > 0)
+                    using (var stringWriter = new StreamWriter(fileStream, Encoding.ASCII))
                     {
-                        fileCount += 1;
-                        byte[] bArray = Encoding.ASCII.GetBytes(fileInfoLine);
-                        serialPort.streamDir.Write(bArray, 0, bArray.Length);
+                        // Get the drive and volume information
+                        System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
+                        long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                        string driveName = driveInfo.Name;
+                        string volumeLabel = driveInfo.VolumeLabel;
+
+                        var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
+                        stringWriter.Write(topLine);
+                        Console.WriteLine(topLine);
+
+                        stringWriter.Write(serialPort.currentWorkingDirectory + "\r\n\r\n");
+                        Console.WriteLine(serialPort.currentWorkingDirectory);
+
+                        // get the list of directories in the current working directory
+                        string[] files = Directory.GetDirectories(serialPort.currentWorkingDirectory);
+
+                        int maxFilenameSize = 0;
+                        foreach (string file in files)
+                        {
+                            if (file.Length > maxFilenameSize)
+                                maxFilenameSize = file.Length;
+                        }
+                        maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
+
+                        int fileCount = 0;
+                        foreach (string file in files)
+                        {
+                            FileInfo fi = new FileInfo(file);
+                            DateTime fCreation = fi.CreationTime;
+
+                            string fileInfoLine = string.Format("{0}    <DIR>   {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                            if (fileInfoLine.Length > 0)
+                            {
+                                fileCount += 1;
+                                stringWriter.Write(fileInfoLine);
+                            }
+                        }
+
+                        stringWriter.Write("\r\n");
+                        stringWriter.Write("    {0} files\r\n", fileCount);
+                        stringWriter.Write("    {0} bytes free\r\n", availableFreeSpace);
                     }
                 }
 
-                byte[] fileCountBuffer = Encoding.ASCII.GetBytes("    " + fileCount.ToString() + " files\r\n");
-                serialPort.streamDir.Write(fileCountBuffer, 0, fileCountBuffer.Length);
-
-                byte[] freeSpaceBuffer = Encoding.ASCII.GetBytes("        " + availableFreeSpace.ToString() + " bytes free\r\n\r\n");
-                serialPort.streamDir.Write(freeSpaceBuffer, 0, freeSpaceBuffer.Length);
-                serialPort.streamDir.Close();
 
                 try
                 {
@@ -563,13 +549,13 @@ namespace FLEXNetSharp
 
         static void StateConnectionStateGetTrack(Ports serialPort, int c)
         {
-            serialPort.track[serialPort.currentDrive] = c;
+            serialPort.imageFile[serialPort.currentDrive].track = c;
             serialPort.SetState((int)CONNECTION_STATE.GET_SECTOR);
         }
 
         static void StateConnectionStateGetSector(Ports serialPort, int c)
         {
-            serialPort.sector[serialPort.currentDrive] = c;
+            serialPort.imageFile[serialPort.currentDrive].sector = c;
 
             if (serialPort.imageFile[serialPort.currentDrive] == null)
                 serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
@@ -619,10 +605,11 @@ namespace FLEXNetSharp
             if (serialPort.imageFile[serialPort.currentDrive] == null)
                 serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
 
+            Console.WriteLine(serialPort.commandFilename);
+
             if (c != 0x0d)
             {
                 // just add the character to the filename
-
                 serialPort.commandFilename += (char)c;
             }
             else
@@ -630,7 +617,6 @@ namespace FLEXNetSharp
                 serialPort.commandFilename += ".DSK";
 
                 // this should close any file that is currently open for this port/drive
-
                 if (serialPort.imageFile[serialPort.currentDrive] != null)
                 {
                     if (serialPort.imageFile[serialPort.currentDrive].stream != null)
@@ -743,86 +729,55 @@ namespace FLEXNetSharp
 
                 if (serialPort.streamDir != null)
                 {
-                    serialPort.streamDir.Close();
+                    serialPort.streamDir.Dispose();
                     serialPort.streamDir = null;
                     File.Delete(serialPort.dirFilename);
                 }
 
                 // get the list of files in the current working directory
 
-                string[] files = Directory.GetFiles(serialPort.currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
-
-                serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
-
-                System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
-                long availableFreeSpace = driveInfo.AvailableFreeSpace;
-                string driveName = driveInfo.Name;
-                string volumeLabel = driveInfo.VolumeLabel;
-
-                byte[] volumeBuffer = Encoding.ASCII.GetBytes("\r\n Volume in Drive " + driveName + " is " + volumeLabel + "\r\n");
-                serialPort.streamDir.Write(volumeBuffer, 0, volumeBuffer.Length);
-
-                byte[] buffer = Encoding.ASCII.GetBytes(serialPort.currentWorkingDirectory + "\r\n\r\n");
-                serialPort.streamDir.Write(buffer, 0, buffer.Length);
-
-                // first get the max filename size
-
-                int maxFilenameSize = 0;
-                foreach (string file in files)
+                using (var fileStream = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
                 {
-                    if (file.Length > maxFilenameSize)
-                        maxFilenameSize = file.Length;
-                }
-                maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
-
-                int fileCount = 0;
-                //foreach (string file in files)
-                //{
-                //    string filename = file + "\r\n";
-                //    filename = filename.Replace(@"\", "/");
-                //    serialPort.currentWorkingDirectory.Replace(@"\", "/");
-                //    filename = filename.Replace(serialPort.currentWorkingDirectory + "/", "");
-
-                //    byte[] bArray = Encoding.ASCII.GetBytes(filename);
-                //    serialPort.streamDir.Write(bArray, 0, bArray.Length);
-                //}
-                //serialPort.streamDir.Close();
-                foreach (string file in files)
-                {
-                    FileInfo fi = new FileInfo(file);
-                    DateTime fCreation = fi.CreationTime;
-
-                    string fileInfoLine = file;
-                    fileInfoLine = fileInfoLine.Replace(serialPort.currentWorkingDirectory + @"\", ""); // get rid of path info
-                    fileInfoLine = fileInfoLine.PadRight(maxFilenameSize, ' ');                         // pad to proper length
-                    fileInfoLine = fileInfoLine + "    " +
-                                                  fCreation.Month.ToString("00") + "/" + fCreation.Day.ToString("00") + "/" + fCreation.Year.ToString("0000") +
-                                                  " " +
-                                                  fCreation.Hour.ToString("00") + ":" + fCreation.Minute.ToString("00") + ":" + fCreation.Second.ToString("00") +
-                                                  "\r\n";
-                    if (fileInfoLine.Length > 0)
+                    using (var stringStream = new StreamWriter(fileStream, Encoding.ASCII))
                     {
-                        fileCount += 1;
-                        byte[] bArray = Encoding.ASCII.GetBytes(fileInfoLine);
-                        serialPort.streamDir.Write(bArray, 0, bArray.Length);
+                        System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
+                        long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                        string driveName = driveInfo.Name;
+                        string volumeLabel = driveInfo.VolumeLabel;
+
+                        stringStream.Write("\r\nVolume in Drive {0} is {1}\r\n", driveName, volumeLabel);
+                        stringStream.Write("{0}\r\n\r\n", serialPort.currentWorkingDirectory);
+
+                        // first get the max filename size
+                        string[] files = Directory.GetFiles(serialPort.currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
+                        int maxFilenameSize = files.Max(f => f.Length);
+                        maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
+
+                        int fileCount = 0;
+                        foreach (string file in files)
+                        {
+                            FileInfo fi = new FileInfo(file);
+                            DateTime fCreation = fi.CreationTime;
+
+                            string fileInfoLine = string.Format("{0}    {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                            if (fileInfoLine.Length > 0)
+                            {
+                                fileCount += 1;
+                                stringStream.Write(fileInfoLine);
+                            }
+                        }
+
+                        stringStream.Write("\r\n");
+                        stringStream.Write("    {0} files\r\n", fileCount);
+                        stringStream.Write("    {0} bytes free\r\n", availableFreeSpace);
                     }
                 }
-
-                byte[] fileCountBuffer = Encoding.ASCII.GetBytes("    " + fileCount.ToString() + " files\r\n");
-                serialPort.streamDir.Write(fileCountBuffer, 0, fileCountBuffer.Length);
-
-                byte[] freeSpaceBuffer = Encoding.ASCII.GetBytes("        " + availableFreeSpace.ToString() + " bytes free\r\n\r\n");
-                serialPort.streamDir.Write(freeSpaceBuffer, 0, freeSpaceBuffer.Length);
-
-                serialPort.streamDir.Close();
-
-                // --------------------------------------
 
                 serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Open, FileAccess.Read, FileShare.Read);
                 if (serialPort.streamDir != null)
                 {
-                    serialPort.WriteByte((byte)'\r', false);
-                    serialPort.WriteByte((byte)'\n', false);
+                    serialPort.WriteByte((byte)'\r');
+                    serialPort.WriteByte((byte)'\n');
                     serialPort.SetState((int)CONNECTION_STATE.SENDING_DIR);
                 }
                 else
@@ -928,7 +883,7 @@ namespace FLEXNetSharp
 
                 if (buffer == -1)
                 {
-                    serialPort.streamDir.Close();
+                    serialPort.streamDir.Dispose();
                     serialPort.streamDir = null;
                     File.Delete(serialPort.dirFilename);
 
@@ -941,7 +896,7 @@ namespace FLEXNetSharp
                 serialPort.WriteByte((byte)'\r', false);
                 serialPort.WriteByte((byte)'\n', false);
 
-                serialPort.streamDir.Close();
+                serialPort.streamDir.Dispose();
                 serialPort.streamDir = null;
                 File.Delete(serialPort.dirFilename);
 
@@ -1122,11 +1077,6 @@ namespace FLEXNetSharp
         {
             while (!done)
             {
-                if (Console.KeyAvailable)
-                {
-                    HandleCommand();
-                }
-
                 foreach (Ports serialPort in listPorts)
                 {
                     try
@@ -1182,197 +1132,6 @@ namespace FLEXNetSharp
                     catch { }
                 }
             }
-        }
-
-        static void HandleCommand()
-        {
-            ConsoleKeyInfo ki = Console.ReadKey();
-            if ((ki.Modifiers & ConsoleModifiers.Alt) == ConsoleModifiers.Alt)
-            {
-                switch (ki.Key)
-                {
-                    case ConsoleKey.F1:                 // re-initialize the connection parameters from config file
-                        InitializeFromConfigFile();
-                        return;
-
-                    case ConsoleKey.F2:
-                        return;
-
-                    case ConsoleKey.F3:
-                        return;
-
-                    case ConsoleKey.F4:
-                        return;
-
-                    case ConsoleKey.F5:
-                        return;
-
-                    case ConsoleKey.F6:
-                        //status = (RS232Error) clsConnection[FocusWindow].rsPort->Rts( !clsConnection[FocusWindow].rsPort->Rts() );
-                        //*StatusLine << "Toggle RTS returns: ";
-                        //if ( status >= 0 ) 
-                        //{
-                        //    *StatusLine << itoa( status, buffer, 10 );
-                        //    return;
-                        //}
-                        break;
-
-                    case ConsoleKey.F7:
-                        //status = (RS232Error) clsConnection[FocusWindow].rsPort->Dtr( !clsConnection[FocusWindow].rsPort->Dtr() );
-                        //*StatusLine << "Toggle Dtr returns: ";
-                        //if ( status >= 0 ) 
-                        //{
-                        //    *StatusLine << itoa( status, buffer, 10 );
-                        //    return;
-                        //}
-                        break;
-
-                    case ConsoleKey.F8:
-                        //status = (RS232Error) clsConnection[FocusWindow].rsPort->FlushRXBuffer();
-                        //*StatusLine << "Flush RX Buffer returns: ";
-                        break;
-
-                    case ConsoleKey.F9:
-                        //status = (RS232Error) clsConnection[FocusWindow].rsPort->FlushTXBuffer();
-                        //*StatusLine << "Flush TX Buffer returns: ";
-                        break;
-
-                    case ConsoleKey.F10:
-                        done = true;
-                        return;
-
-                    default:
-                        return;
-                }
-            }
-            else if ((ki.Modifiers & ConsoleModifiers.Control) == ConsoleModifiers.Control)
-            {
-                done = false;
-            }
-            else if ((ki.Modifiers & ConsoleModifiers.Shift) == ConsoleModifiers.Shift)
-            {
-                done = false;
-            }
-            else
-            {
-                switch (ki.Key)
-                {
-                    case ConsoleKey.F1:
-                        //Helping = !Helping;
-                        //UserWindow->Clear();
-                        //if (Helping)
-                        //    DrawHelp();
-                        return;
-
-                    case ConsoleKey.F2:
-                        //do
-                        //    FocusWindow = ++FocusWindow % WINDOW_COUNT;
-                        //while (clsConnection[FocusWindow].twWindows == 0);
-                        //if (!Helping)
-                        //    UserWindow->Clear();
-                        //clsConnection[FocusWindow].twWindows->Goto();
-                        return;
-
-                    case ConsoleKey.F3:
-                        //clsConnection[FocusWindow].nReading = !clsConnection[FocusWindow].nReading;
-                        //*StatusLine << "Window "
-                        //            << itoa(FocusWindow, buffer, 10);
-                        //*StatusLine << " nReading flag is "
-                        //            << itoa(clsConnection[FocusWindow].nReading, buffer, 10);
-                        return;
-
-                    case ConsoleKey.F4:
-                        //ReadLine("New baud rate:", buffer, 10);
-                        //if (buffer[0] != 0x00)
-                        //{
-                        //    status = clsConnection[FocusWindow].rsPort->Set(atol(buffer));
-                        //    *StatusLine << "Set baud rate to "
-                        //                << ltoa(atol(buffer), buffer, 10)
-                        //                << " returns status of: ";
-                        //    if (status == RS232_SUCCESS)
-                        //        *clsConnection[FocusWindow].twWindows << "baud rate changed to : " << buffer << "\n";
-                        //}
-                        //else
-                        //{
-                        //    *clsConnection[FocusWindow].twWindows << "baud rate unchanged \n";
-                        //    return;
-                        //}
-                        break;
-
-                    case ConsoleKey.F5:
-                        //ReadLine("New parity:", buffer, 10);
-                        //if (buffer[0] != 0x00)
-                        //{
-                        //    status = clsConnection[FocusWindow].rsPort->Set(UNCHANGED, buffer[0]);
-                        //    *StatusLine << "Set parity to "
-                        //                << buffer[0]
-                        //                << " returns status of: ";
-                        //}
-                        //else
-                        //{
-                        //    *clsConnection[FocusWindow].twWindows << "parity unchanged \n";
-                        //    return;
-                        //}
-                        break;
-
-                    case ConsoleKey.F6:
-                        //ReadLine("New word length:", buffer, 10);
-                        //if (buffer[0] != 0x00)
-                        //{
-                        //    status = clsConnection[FocusWindow].rsPort->Set(UNCHANGED, UNCHANGED, atoi(buffer));
-                        //    *StatusLine << "Set word length to "
-                        //                << itoa(atoi(buffer), buffer, 10)
-                        //                << " returns status of: ";
-                        //}
-                        //else
-                        //{
-                        //    *clsConnection[FocusWindow].twWindows << "word length unchanged \n";
-                        //    return;
-                        //}
-                        break;
-
-                    case ConsoleKey.F7:
-                        //ReadLine("New stop bits:", buffer, 10);
-                        //if (buffer[0] != 0x00)
-                        //{
-                        //    status = clsConnection[FocusWindow].rsPort->Set(UNCHANGED,
-                        //                        UNCHANGED,
-                        //                        UNCHANGED,
-                        //                        atoi(buffer));
-                        //    *StatusLine << "Set stop bits to "
-                        //                << itoa(atoi(buffer), buffer, 10)
-                        //                << " returns status of: ";
-                        //}
-                        //else
-                        //{
-                        //    *clsConnection[FocusWindow].twWindows << "stop bits unchanged \n";
-                        //    return;
-                        //}
-                        break;
-
-                    case ConsoleKey.F8:
-                        //clsConnection[nPort].g_displaySectorData = !clsConnection[nPort].g_displaySectorData;
-                        //*StatusLine << "Sector Display is : " << (clsConnection[nPort].g_displaySectorData ? "ON" : "OFF") << " Status: ";
-                        verboseOutput = !verboseOutput;
-                        Console.WriteLine(string.Format("verbose is {0}", verboseOutput ? "on" : "off"));
-                        return;
-
-                    case ConsoleKey.F9:
-                        //clsConnection[nPort].nDisplayOutputBytes = !clsConnection[nPort].nDisplayOutputBytes;
-                        //*StatusLine << "Output Display is : " << (clsConnection[nPort].nDisplayOutputBytes ? "ON" : "OFF") << " Status: ";
-                        return;
-
-                    case ConsoleKey.F10:
-                        foreach (Ports serialPort in listPorts)
-                        {
-                            serialPort.SetState((int)CONNECTION_STATE.NOT_CONNECTED);
-                            Console.WriteLine("Serial Port " + serialPort.port.ToString() + " is reset to NOT CONNECTED");
-                        }
-                        return;
-
-                }
-            }
-            //    *StatusLine << clsConnection[FocusWindow].rsPort->ErrorName( status );
         }
 
         static void Main(string[] args)
