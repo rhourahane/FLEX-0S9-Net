@@ -166,7 +166,7 @@ namespace FLEXNetSharp
 
                         if (!Directory.Exists(p.defaultStartDirectory))
                         {
-                            Console.WriteLine("Invalid default directory setting to {}", applicationPath);
+                            Console.WriteLine("Invalid default directory setting to {0}", applicationPath);
                             p.defaultStartDirectory = applicationPath;
                         }
                         p.currentWorkingDirectory = p.defaultStartDirectory;
