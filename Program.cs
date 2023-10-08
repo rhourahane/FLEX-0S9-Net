@@ -119,41 +119,49 @@ namespace FLEXNetSharp
                     {
                         Ports p = new Ports();
                         p.defaultStartDirectory = Directory.GetCurrentDirectory();
-                        p.port = Convert.ToInt32(portNode.Attributes["num"].Value);
+                        if (portNode.Attributes["num"] != null)
+                        {
+                            p.port = $"COM{portNode.Attributes["num"].Value}";
+                        }
+                        else
+                        {
+                            p.port = portNode.Attributes["device"].Value;
+                        }
+
                         foreach (XmlNode paramters in portNode.ChildNodes)
                         {
-                            if (paramters.Name == "Rate")
+                            switch (paramters.Name)
                             {
-                                p.rate = Convert.ToInt32(paramters.InnerText);
-                            }
-                            else if (paramters.Name == "CpuSpeed")
-                            {
-                                p.speed = paramters.InnerText;
-                            }
-                            else if (paramters.Name == "Verbose")
-                            {
-                                p.verbose = paramters.InnerText;
-                            }
-                            else if (paramters.Name == "AutoMount")
-                            {
-                                p.autoMount = paramters.InnerText;
-                            }
-                            else if (paramters.Name == "DefaultDirectory")
-                            {
-                                p.defaultStartDirectory = paramters.InnerText;
-                            }
-                            else if (paramters.Name == "ImageFiles")
-                            {
-                                int index = 0;
-                                foreach (XmlNode imageFile in paramters.ChildNodes)
-                                {
-                                    if (imageFile.Name == "ImageFile")
+                                case "Rate":
+                                    p.rate = Convert.ToInt32(paramters.InnerText);
+                                    break;
+
+                                case "Verbose":
+                                    p.verbose = paramters.InnerText;
+                                    break;
+
+                                case "AutoMount":
+                                    p.autoMount = paramters.InnerText;
+                                    break;
+
+                                case "DefaultDirectory":
+                                    p.defaultStartDirectory = paramters.InnerText;
+                                    break;
+
+                                case "ImageFiles":
                                     {
-                                        p.imageFile[index] = new ImageFile();
-                                        p.imageFile[index].Name = imageFile.InnerText;
-                                        index++;
+                                        int index = 0;
+                                        foreach (XmlNode imageFile in paramters.ChildNodes)
+                                        {
+                                            if (imageFile.Name == "ImageFile")
+                                            {
+                                                p.imageFile[index] = new ImageFile();
+                                                p.imageFile[index].Name = imageFile.InnerText;
+                                                index++;
+                                            }
+                                        }
                                     }
-                                }
+                                    break;
                             }
                         }
                         p.currentWorkingDirectory = p.defaultStartDirectory;
@@ -170,7 +178,6 @@ namespace FLEXNetSharp
 
                                 listPorts[i].defaultStartDirectory = p.defaultStartDirectory;
                                 listPorts[i].rate = p.rate;
-                                listPorts[i].speed = p.speed;
                                 listPorts[i].verbose = p.verbose;
                                 listPorts[i].autoMount = p.autoMount;
 
@@ -320,51 +327,49 @@ namespace FLEXNetSharp
                 }
 
                 using (var fileStream = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                using (var stringWriter = new StreamWriter(fileStream, Encoding.ASCII))
                 {
-                    using (var stringWriter = new StreamWriter(fileStream, Encoding.ASCII))
+                    // Get the drive and volume information
+                    System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
+                    long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                    string driveName = driveInfo.Name;
+                    string volumeLabel = driveInfo.VolumeLabel;
+
+                    var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
+                    stringWriter.Write(topLine);
+                    Console.WriteLine(topLine);
+
+                    stringWriter.Write(serialPort.currentWorkingDirectory + "\r\n\r\n");
+                    Console.WriteLine(serialPort.currentWorkingDirectory);
+
+                    // get the list of directories in the current working directory
+                    string[] files = Directory.GetDirectories(serialPort.currentWorkingDirectory);
+
+                    int maxFilenameSize = 0;
+                    foreach (string file in files)
                     {
-                        // Get the drive and volume information
-                        System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
-                        long availableFreeSpace = driveInfo.AvailableFreeSpace;
-                        string driveName = driveInfo.Name;
-                        string volumeLabel = driveInfo.VolumeLabel;
-
-                        var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
-                        stringWriter.Write(topLine);
-                        Console.WriteLine(topLine);
-
-                        stringWriter.Write(serialPort.currentWorkingDirectory + "\r\n\r\n");
-                        Console.WriteLine(serialPort.currentWorkingDirectory);
-
-                        // get the list of directories in the current working directory
-                        string[] files = Directory.GetDirectories(serialPort.currentWorkingDirectory);
-
-                        int maxFilenameSize = 0;
-                        foreach (string file in files)
-                        {
-                            if (file.Length > maxFilenameSize)
-                                maxFilenameSize = file.Length;
-                        }
-                        maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
-
-                        int fileCount = 0;
-                        foreach (string file in files)
-                        {
-                            FileInfo fi = new FileInfo(file);
-                            DateTime fCreation = fi.CreationTime;
-
-                            string fileInfoLine = string.Format("{0}    <DIR>   {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
-                            if (fileInfoLine.Length > 0)
-                            {
-                                fileCount += 1;
-                                stringWriter.Write(fileInfoLine);
-                            }
-                        }
-
-                        stringWriter.Write("\r\n");
-                        stringWriter.Write("    {0} files\r\n", fileCount);
-                        stringWriter.Write("    {0} bytes free\r\n", availableFreeSpace);
+                        if (file.Length > maxFilenameSize)
+                            maxFilenameSize = file.Length;
                     }
+                    maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
+
+                    int fileCount = 0;
+                    foreach (string file in files)
+                    {
+                        FileInfo fi = new FileInfo(file);
+                        DateTime fCreation = fi.CreationTime;
+
+                        string fileInfoLine = string.Format("{0}    <DIR>   {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                        if (fileInfoLine.Length > 0)
+                        {
+                            fileCount += 1;
+                            stringWriter.Write(fileInfoLine);
+                        }
+                    }
+
+                    stringWriter.Write("\r\n");
+                    stringWriter.Write("    {0} files\r\n", fileCount);
+                    stringWriter.Write("    {0} bytes free\r\n", availableFreeSpace);
                 }
 
 
@@ -735,42 +740,40 @@ namespace FLEXNetSharp
                 }
 
                 // get the list of files in the current working directory
-
                 using (var fileStream = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                using (var stringStream = new StreamWriter(fileStream, Encoding.ASCII))
                 {
-                    using (var stringStream = new StreamWriter(fileStream, Encoding.ASCII))
+                    System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
+                    long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                    string driveName = driveInfo.Name;
+                    string volumeLabel = driveInfo.VolumeLabel;
+
+                    stringStream.Write("\r\nVolume in Drive {0} is {1}\r\n", driveName, volumeLabel);
+                    stringStream.Write("{0}\r\n\r\n", serialPort.currentWorkingDirectory);
+
+                    string[] files = Directory.GetFiles(serialPort.currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
+
+                    // first get the max filename size
+                    int maxFilenameSize = files.Max(f => f.Length);
+                    maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
+
+                    int fileCount = 0;
+                    foreach (string file in files)
                     {
-                        System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
-                        long availableFreeSpace = driveInfo.AvailableFreeSpace;
-                        string driveName = driveInfo.Name;
-                        string volumeLabel = driveInfo.VolumeLabel;
+                        FileInfo fi = new FileInfo(file);
+                        DateTime fCreation = fi.CreationTime;
 
-                        stringStream.Write("\r\nVolume in Drive {0} is {1}\r\n", driveName, volumeLabel);
-                        stringStream.Write("{0}\r\n\r\n", serialPort.currentWorkingDirectory);
-
-                        // first get the max filename size
-                        string[] files = Directory.GetFiles(serialPort.currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
-                        int maxFilenameSize = files.Max(f => f.Length);
-                        maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
-
-                        int fileCount = 0;
-                        foreach (string file in files)
+                        string fileInfoLine = string.Format("{0}    {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                        if (fileInfoLine.Length > 0)
                         {
-                            FileInfo fi = new FileInfo(file);
-                            DateTime fCreation = fi.CreationTime;
-
-                            string fileInfoLine = string.Format("{0}    {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
-                            if (fileInfoLine.Length > 0)
-                            {
-                                fileCount += 1;
-                                stringStream.Write(fileInfoLine);
-                            }
+                            fileCount += 1;
+                            stringStream.Write(fileInfoLine);
                         }
-
-                        stringStream.Write("\r\n");
-                        stringStream.Write("    {0} files\r\n", fileCount);
-                        stringStream.Write("    {0} bytes free\r\n", availableFreeSpace);
                     }
+
+                    stringStream.Write("\r\n");
+                    stringStream.Write("    {0} files\r\n", fileCount);
+                    stringStream.Write("    {0} bytes free\r\n", availableFreeSpace);
                 }
 
                 serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Open, FileAccess.Read, FileShare.Read);
@@ -1013,12 +1016,13 @@ namespace FLEXNetSharp
                 {
                     // if we come in here with a non-null value for serialPort.sp that means that we have a COM port open for this logical serial port
                     // we must close it before we can open it again or open another.
-
-                    serialPort.sp.Close();
+                    serialPort.sp.Dispose();
                 }
 
                 if (serialPort.sp == null)
-                    serialPort.sp = new SerialPort("COM" + serialPort.port.ToString(), serialPort.rate, Parity.None, 8, StopBits.One);
+                {
+                    serialPort.sp = new SerialPort(serialPort.port, serialPort.rate, Parity.None, 8, StopBits.One);
+                }
 
                 serialPort.sp.ReadBufferSize = 32768;
                 serialPort.sp.WriteBufferSize = 32768;
@@ -1053,7 +1057,6 @@ namespace FLEXNetSharp
 
                 Console.WriteLine(string.Format("COM{0} parameters:", serialPort.port));
                 Console.WriteLine(string.Format("    Rate:              {0}", serialPort.rate));
-                Console.WriteLine(string.Format("    CpuSpeed:          {0}", serialPort.speed));
                 Console.WriteLine(string.Format("    Verbose:           {0}", serialPort.verbose));
                 Console.WriteLine(string.Format("    AutoMount:         {0}", serialPort.autoMount));
                 Console.WriteLine(string.Format("    DefaultDirectory   {0}", serialPort.defaultStartDirectory));

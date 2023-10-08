@@ -9,7 +9,7 @@ namespace FLEXNetSharp
     {
         public Stream streamDir = null;
         public System.IO.Ports.SerialPort sp;
-        public int          port;
+        public string       port;
         public int          state;
         public int          createState;
         public int          rate;

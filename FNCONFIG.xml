@@ -1,9 +1,8 @@
 <?xml version = "1.0"?>
     <Configuration>
 	    <Ports>
-          <Port num = "6">
+          <Port device = "COM6">
             <Rate>115200</Rate>
-            <CpuSpeed>F</CpuSpeed>
             <Verbose>V</Verbose>
             <AutoMount>T</AutoMount>
             <DefaultDirectory>C:\Users\Robin\Source\Repos\FLEX-0S9-Net\DISKS\</DefaultDirectory>
