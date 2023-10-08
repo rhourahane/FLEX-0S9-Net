@@ -255,18 +255,27 @@ namespace FLEXNetSharp
                     imageFile[nDrive].fileFormat = GetFileFormat(imageFile[nDrive].stream);
                     imageFile[nDrive].readOnly = false;
                 }
-                catch
+                catch (UnauthorizedAccessException)
                 {
+                    // Unable to open file for read/write try readonly
                     try
                     {
                         imageFile[nDrive].stream = File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read);
                         imageFile[nDrive].fileFormat = GetFileFormat(imageFile[nDrive].stream);
                         imageFile[nDrive].readOnly = true;
+
+                        Console.WriteLine("Mounting {0} readonly", fileName);
                     }
-                    catch
+                    catch (Exception eIn)
                     {
+                        Console.WriteLine(eIn);
                         c = 0x15;
                     }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                    c = 0x15;
                 }
 
                 string Message;
@@ -415,6 +424,7 @@ namespace FLEXNetSharp
                             }
                             catch (Exception e)
                             {
+                                Console.WriteLine(e);
                                 string message = e.Message;
                             }
                             Console.Write("[" + lSectorOffset.ToString("X8") + "]");
@@ -466,8 +476,9 @@ namespace FLEXNetSharp
                     imageFile[currentDrive].stream.Write(sectorBuffer, 0, bytesPerSector);
                     status = 0x06;
                 }
-                catch
+                catch (Exception e)
                 {
+                    Console.WriteLine(e);
                 }
             }
             else
@@ -561,26 +572,21 @@ namespace FLEXNetSharp
             {
                 if ((numberOfSectors > 0) && (numberOfSectors <= 255))
                 {
-
                     // total number of user sectors = number tracks minus one times the number of sectors
                     // because track 0 is not for users
-
                     int nTotalSectors = (numberOfTracks - 1) * numberOfSectors;
 
                     DateTime now = DateTime.Now;
 
                     if (nTotalSectors > 0)
                     {
-                        try
+                        if (File.Exists(fullFilename))
                         {
-                            Stream fp = File.Open(fullFilename, FileMode.Open, FileAccess.Read, FileShare.Read);
                             cStatus = 0x15;     // file already exists
-                            fp.Close();
                         }
-                        catch
+                        else
                         {
                             // file does not yet exist - create it
-
                             try
                             {
                                 Stream fp = File.Open(fullFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
@@ -669,8 +675,9 @@ namespace FLEXNetSharp
                                 cStatus = 0x06;
                                 fp.Close();
                             }
-                            catch
+                            catch (Exception e)
                             {
+                                Console.WriteLine(e);
                                 cStatus = 0x15;     // could not create file
                             }
                         }

@@ -101,15 +101,14 @@ namespace FLEXNetSharp
         static string shutDown;
         static bool done = false;
         static List<Ports> listPorts = new List<Ports>();
-        static ArrayList ports = new ArrayList();
         static CultureInfo ci = new CultureInfo("en-us");
 
         static void ParseConfigFile()
         {
-            string ApplicationPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string applicationPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
             XmlDocument doc = new XmlDocument();
-            doc.Load(Path.Combine(ApplicationPath, "fnconfig.xml"));
+            doc.Load(Path.Combine(applicationPath, "fnconfig.xml"));
 
             foreach (XmlNode node in doc.DocumentElement.ChildNodes)
             {
@@ -164,6 +163,12 @@ namespace FLEXNetSharp
                                     break;
                             }
                         }
+
+                        if (!Directory.Exists(p.defaultStartDirectory))
+                        {
+                            Console.WriteLine("Invalid default directory setting to {}", applicationPath);
+                            p.defaultStartDirectory = applicationPath;
+                        }
                         p.currentWorkingDirectory = p.defaultStartDirectory;
 
                         bool portAlreadyExists = false;
@@ -171,7 +176,6 @@ namespace FLEXNetSharp
                         for (int i = 0; i < listPorts.Count; i++)
                         {
                             // we already have this port in the list - just update it
-
                             if (listPorts[i].port == p.port)
                             {
                                 portAlreadyExists = true;
@@ -380,8 +384,10 @@ namespace FLEXNetSharp
                     serialPort.WriteByte((byte)'\n', false);
                     serialPort.SetState((int)CONNECTION_STATE.SENDING_DIR);
                 }
-                catch
+                catch (Exception e)
                 {
+                    Console.WriteLine(e);
+
                     File.Delete(serialPort.dirFilename);
 
                     serialPort.WriteByte((byte)0x06);
@@ -508,7 +514,10 @@ namespace FLEXNetSharp
             if (serialPort.imageFile[serialPort.currentDrive] == null)
                 serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
 
-            serialPort.sp.Write(serialPort.imageFile[serialPort.currentDrive].driveInfo.MountedFilename);
+            if (serialPort.imageFile[serialPort.currentDrive].driveInfo.MountedFilename != null)
+            {
+                serialPort.sp.Write(serialPort.imageFile[serialPort.currentDrive].driveInfo.MountedFilename);
+            }
 
             serialPort.WriteByte(0x0D, false);
             serialPort.WriteByte(0x06);
@@ -808,8 +817,9 @@ namespace FLEXNetSharp
                     serialPort.currentWorkingDirectory = Directory.GetCurrentDirectory();
                     serialPort.currentWorkingDirectory.TrimEnd('\\');
                 }
-                catch
+                catch (Exception e)  
                 {
+                    Console.WriteLine(e);
                     status = 0x15;
                 }
 
@@ -824,16 +834,8 @@ namespace FLEXNetSharp
                 serialPort.commandFilename += (char)c;
             else
             {
-                //int nNumDrives;
-                //int nCurDrive;
-
                 byte status = 0x00;
 
-                //_dos_setdrive (serialPort.commandFilename[0] - 0x40, &nNumDrives);
-                //_dos_getdrive (&nCurDrive);
-
-                //if (nCurDrive = (serialPort.commandFilename[0] - 0x40))
-                //{
                 try
                 {
                     Directory.SetCurrentDirectory(serialPort.commandFilename);
@@ -842,21 +844,11 @@ namespace FLEXNetSharp
                     serialPort.currentWorkingDirectory = Directory.GetCurrentDirectory();
                     serialPort.currentWorkingDirectory.TrimEnd('\\');
                 }
-                catch
+                catch (Exception e)
                 {
+                    Console.WriteLine(e);
                     status = 0x15;
                 }
-                //}
-                //else
-                //    status = 0x15;
-
-                //if ((!lastActivityWasServer && !lastActivityWasClient) || lastActivityWasClient)
-                //{
-                //    Console.WriteLine();
-                //    Console.Write("SERVER: ");
-                //}
-                //lastActivityWasServer = true;
-                //lastActivityWasClient = false;
 
                 serialPort.SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
                 Console.Write(status.ToString("X2", ci) + " ");
@@ -1132,7 +1124,10 @@ namespace FLEXNetSharp
                             }
                         }
                     }
-                    catch { }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine(e);
+                    }
                 }
             }
         }

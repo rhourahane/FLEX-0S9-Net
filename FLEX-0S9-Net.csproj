@@ -29,10 +29,10 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <Content Include="FNCONFIG.xml">
+    <Content Include="fnconfig.xml">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Include="FNCONFIG_MULTIPLES.xml" />
+    <Content Include="fnconfig_multiples.xml" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
