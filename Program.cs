@@ -179,36 +179,7 @@ namespace FLEXNetSharp
             }
         }
 
-
-        static void StateConnectionStateNotConnected(Ports serialPort, int c)
-        {
-            if (c == 0x55)
-            {
-                serialPort.State = CONNECTION_STATE.SYNCRONIZING;
-                serialPort.WriteByte((byte)0x55);
-            }
-        }
-
-        // send ack to sync
-
-        static void StateConnectionStateSynchronizing(Ports serialPort, int c)
-        {
-            if (c != 0x55)
-            {
-                if (c == 0xAA)
-                {
-                    serialPort.WriteByte((byte)0xAA);
-                    serialPort.State = CONNECTION_STATE.CONNECTED;
-                }
-                else
-                {
-                    serialPort.State = CONNECTION_STATE.NOT_CONNECTED;
-                }
-            }
-        }
-
         // this is the main loop while we are connected waiting for commands
-
         static void StateConnectionStateConnected(Ports serialPort, int c)
         {
             if (c == 'U')
@@ -349,7 +320,7 @@ namespace FLEXNetSharp
 
                 try
                 {
-                    serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Open, FileAccess.Read, FileShare.Read);
+                    serialPort.streamDir = File.OpenText(serialPort.dirFilename);
                     serialPort.WriteByte((byte)'\r', false);
                     serialPort.WriteByte((byte)'\n', false);
                     serialPort.State = CONNECTION_STATE.SENDING_DIR;
@@ -467,34 +438,6 @@ namespace FLEXNetSharp
             }
         }
 
-        // 'd' command recieved - Report which disk image is mounted to requested drive 
-
-        static void StateConnectionStateGetRequestedMountDrive(Ports serialPort, int c)
-        {
-            // Report which disk image is mounted to requested drive
-
-            serialPort.currentDrive = c;
-
-            serialPort.SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
-            Console.Write(serialPort.currentWorkingDirectory);
-            Console.Write("\r");
-            Console.Write("\n");
-            serialPort.SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
-
-            if (serialPort.imageFile[serialPort.currentDrive] == null)
-                serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
-
-            if (serialPort.imageFile[serialPort.currentDrive].driveInfo.MountedFilename != null)
-            {
-                serialPort.sp.Write(serialPort.imageFile[serialPort.currentDrive].driveInfo.MountedFilename);
-            }
-
-            serialPort.WriteByte(0x0D, false);
-            serialPort.WriteByte(0x06);
-
-            serialPort.State = CONNECTION_STATE.CONNECTED;
-        }
-
         // 's'end Sector Request with drive - this state gets the drive number
 
         static void StateConnectionStateGetReadDrive(Ports serialPort, int c)
@@ -529,33 +472,6 @@ namespace FLEXNetSharp
         {
             serialPort.currentDrive = c;
             serialPort.State = CONNECTION_STATE.CREATE_GETPARAMETERS;
-        }
-
-        static void StateConnectionStateGetTrack(Ports serialPort, int c)
-        {
-            serialPort.imageFile[serialPort.currentDrive].track = c;
-            serialPort.State = CONNECTION_STATE.GET_SECTOR;
-        }
-
-        static void StateConnectionStateGetSector(Ports serialPort, int c)
-        {
-            serialPort.imageFile[serialPort.currentDrive].sector = c;
-
-            if (serialPort.imageFile[serialPort.currentDrive] == null)
-                serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
-
-            if (serialPort.imageFile[serialPort.currentDrive].driveInfo.mode == (int)SECTOR_ACCESS_MODE.S_MODE)
-            {
-                Console.WriteLine("\r\nState is SENDING_SECTOR");
-                serialPort.SendSector();
-                serialPort.State = CONNECTION_STATE.WAIT_ACK;
-            }
-            else
-            {
-                serialPort.sectorIndex = 0;
-                serialPort.calculatedCRC = 0;
-                serialPort.State = CONNECTION_STATE.RECEIVING_SECTOR;
-            }
         }
 
         static void StateConnectionStateRecievingSector(Ports serialPort, int c)
@@ -698,79 +614,6 @@ namespace FLEXNetSharp
             //    }
         }
 
-        static void StateConnectionStateDirGetFilename(Ports serialPort, int c)
-        {
-            if (c != 0x0d)
-                serialPort.commandFilename += (char)c;
-            else
-            {
-                if (serialPort.commandFilename.Length == 0)
-                    serialPort.commandFilename = "*.DSK";
-                else
-                    serialPort.commandFilename += ".DSK";
-
-                serialPort.dirFilename = "dirtxt" + serialPort.port.ToString() + serialPort.currentDrive.ToString() + ".txt";
-
-                if (serialPort.streamDir != null)
-                {
-                    serialPort.streamDir.Dispose();
-                    serialPort.streamDir = null;
-                    File.Delete(serialPort.dirFilename);
-                }
-
-                // get the list of files in the current working directory
-                using (var fileStream = File.Open(serialPort.dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
-                using (var stringStream = new StreamWriter(fileStream, Encoding.ASCII))
-                {
-                    System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(serialPort.currentWorkingDirectory));
-                    long availableFreeSpace = driveInfo.AvailableFreeSpace;
-                    string driveName = driveInfo.Name;
-                    string volumeLabel = driveInfo.VolumeLabel;
-
-                    stringStream.Write("\r\nVolume in Drive {0} is {1}\r\n", driveName, volumeLabel);
-                    stringStream.Write("{0}\r\n\r\n", serialPort.currentWorkingDirectory);
-
-                    string[] files = Directory.GetFiles(serialPort.currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
-
-                    // first get the max filename size
-                    int maxFilenameSize = files.Max(f => f.Length);
-                    maxFilenameSize = maxFilenameSize - serialPort.currentWorkingDirectory.Length;
-
-                    int fileCount = 0;
-                    foreach (string file in files)
-                    {
-                        FileInfo fi = new FileInfo(file);
-                        DateTime fCreation = fi.CreationTime;
-
-                        string fileInfoLine = string.Format("{0}    {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
-                        if (fileInfoLine.Length > 0)
-                        {
-                            fileCount += 1;
-                            stringStream.Write(fileInfoLine);
-                        }
-                    }
-
-                    stringStream.Write("\r\n");
-                    stringStream.Write("    {0} files\r\n", fileCount);
-                    stringStream.Write("    {0} bytes free\r\n", availableFreeSpace);
-                }
-
-                serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Open, FileAccess.Read, FileShare.Read);
-                if (serialPort.streamDir != null)
-                {
-                    serialPort.WriteByte((byte)'\r');
-                    serialPort.WriteByte((byte)'\n');
-                    serialPort.State = CONNECTION_STATE.SENDING_DIR;
-                }
-                else
-                {
-                    serialPort.WriteByte(0x06);
-                    File.Delete(serialPort.dirFilename);
-                    serialPort.State = CONNECTION_STATE.CONNECTED;
-                }
-            }
-        }
-
         static void StateConnectionStateCDGetFilename(Ports serialPort, int c)
         {
             if (c != 0x0d)
@@ -824,48 +667,6 @@ namespace FLEXNetSharp
                 Console.Write(status.ToString("X2", ci) + " ");
                 serialPort.SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
 
-                serialPort.State = CONNECTION_STATE.CONNECTED;
-            }
-        }
-
-        static void StateConnectionStateSendingDir(Ports serialPort, int c)
-        {
-            if (c == ' ')
-            {
-                string line = "";
-                int buffer = 0x00;
-
-                while ((buffer = serialPort.streamDir.ReadByte()) != -1)
-                {
-                    if (buffer != (int)'\n')
-                        line += (char)buffer;
-                    else
-                        break;
-                }
-                serialPort.WriteByte((byte)'\r', false);
-                serialPort.sp.Write(line);
-                serialPort.WriteByte((byte)'\n', false);
-
-                if (buffer == -1)
-                {
-                    serialPort.streamDir.Dispose();
-                    serialPort.streamDir = null;
-                    File.Delete(serialPort.dirFilename);
-
-                    serialPort.WriteByte(0x06);
-                    serialPort.State = CONNECTION_STATE.CONNECTED;
-                }
-            }
-            else if (c == 0x1b)
-            {
-                serialPort.WriteByte((byte)'\r', false);
-                serialPort.WriteByte((byte)'\n', false);
-
-                serialPort.streamDir.Dispose();
-                serialPort.streamDir = null;
-                File.Delete(serialPort.dirFilename);
-
-                serialPort.WriteByte(0x06);
                 serialPort.State = CONNECTION_STATE.CONNECTED;
             }
         }
@@ -947,22 +748,6 @@ namespace FLEXNetSharp
                     serialPort.State = CONNECTION_STATE.CONNECTED;
                 }
             }
-        }
-
-        static void StateConnectionStateWaitACK(Ports serialPort, int c)
-        {
-            //*StatusLine << '\n' << "State is WAIT_ACK";
-
-            if (c == 0x06)
-                serialPort.State = CONNECTION_STATE.CONNECTED;
-            //else if (c == 's')
-            //{
-            //    // 's'end Sector Request with drive
-
-            //    serialPort.SetState((int)CONNECTION_STATE.GET_READ_DRIVE);
-            //}
-            else
-                serialPort.State = CONNECTION_STATE.CONNECTED;
         }
 
         static void InitializeFromConfigFile(string[] args)
@@ -1067,26 +852,53 @@ namespace FLEXNetSharp
 
                             switch (serialPort.State)
                             {
-                                case CONNECTION_STATE.NOT_CONNECTED:               StateConnectionStateNotConnected            (serialPort, c); break;
-                                case CONNECTION_STATE.SYNCRONIZING:                StateConnectionStateSynchronizing           (serialPort, c); break;
+                                case CONNECTION_STATE.NOT_CONNECTED:
+                                    serialPort.StateConnectionStateNotConnected(c);
+                                    break;
+
+                                case CONNECTION_STATE.SYNCRONIZING:
+                                    serialPort.StateConnectionStateSynchronizing(c);
+                                    break;
+
                                 case CONNECTION_STATE.CONNECTED:                   StateConnectionStateConnected               (serialPort, c); break;
-                                case CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:   StateConnectionStateGetRequestedMountDrive  (serialPort, c); break;
+                                case CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:
+                                    serialPort.StateConnectionStateGetRequestedMountDrive(c);
+                                    break;
+
                                 case CONNECTION_STATE.GET_READ_DRIVE:              StateConnectionStateGetReadDrive            (serialPort, c); break;
                                 case CONNECTION_STATE.GET_WRITE_DRIVE:             StateConnectionStateGetWriteDrive           (serialPort, c); break;
                                 case CONNECTION_STATE.GET_MOUNT_DRIVE:             StateConnectionStateGetMountDrive           (serialPort, c); break;
                                 case CONNECTION_STATE.GET_CREATE_DRIVE:            StateConnectionStateGetCreateDrive          (serialPort, c); break;
-                                case CONNECTION_STATE.GET_TRACK:                   StateConnectionStateGetTrack                (serialPort, c); break;
-                                case CONNECTION_STATE.GET_SECTOR:                  StateConnectionStateGetSector               (serialPort, c); break;
+                                case CONNECTION_STATE.GET_TRACK:
+                                    serialPort.StateConnectionStateGetTrack(c);
+                                    break;
+
+                                case CONNECTION_STATE.GET_SECTOR:
+                                    serialPort.StateConnectionStateGetSector(c);
+                                    break;
+
                                 case CONNECTION_STATE.RECEIVING_SECTOR:            StateConnectionStateRecievingSector         (serialPort, c); break;
                                 case CONNECTION_STATE.GET_CRC:                     StateConnectionStateGetCRC                  (serialPort, c); break;
                                 case CONNECTION_STATE.MOUNT_GETFILENAME:           StateConnectionStateMountGetFilename        (serialPort, c); break;
                                 case CONNECTION_STATE.DELETE_GETFILENAME:          StateConnectionStateDeleteGetFilename       (serialPort, c); break;
-                                case CONNECTION_STATE.DIR_GETFILENAME:             StateConnectionStateDirGetFilename          (serialPort, c); break;
-                                case CONNECTION_STATE.CD_GETFILENAME:              StateConnectionStateCDGetFilename           (serialPort, c); break;
+                                case CONNECTION_STATE.DIR_GETFILENAME:
+                                    serialPort.StateConnectionStateDirGetFilename(c);
+                                    break;
+
+                                case CONNECTION_STATE.CD_GETFILENAME:
+                                    serialPort.StateConnectionStateCDGetFilename(c);
+                                    break;
+
                                 case CONNECTION_STATE.DRIVE_GETFILENAME:           StateConnectionStateDriveGetFilename        (serialPort, c); break;
-                                case CONNECTION_STATE.SENDING_DIR:                 StateConnectionStateSendingDir              (serialPort, c); break;
+                                case CONNECTION_STATE.SENDING_DIR:
+                                    serialPort.StateConnectionStateSendingDir(c);
+                                    break;
+
                                 case CONNECTION_STATE.CREATE_GETPARAMETERS:        StateConnectionStateCreateGetParameters     (serialPort, c); break;
-                                case CONNECTION_STATE.WAIT_ACK:                    StateConnectionStateWaitACK                 (serialPort, c); break;
+                                case CONNECTION_STATE.WAIT_ACK:
+                                    serialPort.StateConnectionStateWaitACK(c);
+                                    break;
+
                                 default:
                                     serialPort.State = CONNECTION_STATE.NOT_CONNECTED   ;
                                     //sprintf (szHexTemp, "%02X", c);

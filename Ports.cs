@@ -2,12 +2,15 @@
 using System.Globalization;
 
 using System.IO;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace FLEXNetSharp
 {
     public class Ports
     {
-        public Stream streamDir = null;
+        public StreamReader streamDir = null;
         public System.IO.Ports.SerialPort sp;
         public string       port;
         private CONNECTION_STATE state;
@@ -144,16 +147,11 @@ namespace FLEXNetSharp
             return ff;
         }
 
-        public void WriteByte(byte byteToWrite)
+        private readonly byte[] serialBuffer = new byte[8];
+        public void WriteByte(byte byteToWrite, bool displayOnScreen = true)
         {
-            WriteByte(byteToWrite, true);
-        }
-
-        public void WriteByte(byte byteToWrite, bool displayOnScreen)
-        {
-            byte[] byteBuffer = new byte[1];
-            byteBuffer[0] = byteToWrite;
-            sp.Write(byteBuffer, 0, 1);
+            serialBuffer[0] = byteToWrite;
+            sp.Write(serialBuffer, 0, 1);
 
             if (displayOnScreen)
             {
@@ -227,6 +225,241 @@ namespace FLEXNetSharp
                     break;
             }
         }
+
+
+        public void StateConnectionStateNotConnected(int c)
+        {
+            if (c == 0x55)
+            {
+                State = CONNECTION_STATE.SYNCRONIZING;
+                WriteByte(0x55);
+            }
+        }
+
+        // send ack to sync
+
+        public void StateConnectionStateSynchronizing(int c)
+        {
+            if (c != 0x55)
+            {
+                if (c == 0xAA)
+                {
+                    WriteByte(0xAA);
+                    State = CONNECTION_STATE.CONNECTED;
+                }
+                else
+                {
+                    State = CONNECTION_STATE.NOT_CONNECTED;
+                }
+            }
+        }
+
+        public void StateConnectionStateDirGetFilename(int c)
+        {
+            if (c != 0x0d)
+                commandFilename += (char)c;
+            else
+            {
+                if (commandFilename.Length == 0)
+                {
+                    commandFilename = "*.DSK";
+                }
+                else
+                {
+                    commandFilename += ".DSK";
+                }
+
+                dirFilename = $"dirtxt{port}-{currentDrive}.txt";
+
+                if (streamDir != null)
+                {
+                    streamDir.Dispose();
+                    streamDir = null;
+                    File.Delete(dirFilename);
+                }
+
+                // get the list of files in the current working directory
+                using (var fileStream = File.Open(dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                using (var stringStream = new StreamWriter(fileStream, Encoding.ASCII))
+                {
+                    System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(currentWorkingDirectory));
+                    long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                    string driveName = driveInfo.Name;
+                    string volumeLabel = driveInfo.VolumeLabel;
+
+                    stringStream.Write("\r\nVolume in Drive {0} is {1}\r\n", driveName, volumeLabel);
+                    stringStream.Write("{0}\r\n\r\n", currentWorkingDirectory);
+
+                    string[] files = Directory.GetFiles(currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
+
+                    // first get the max filename size
+                    int maxFilenameSize = files.Max(f => f.Length);
+                    maxFilenameSize = maxFilenameSize - currentWorkingDirectory.Length;
+
+                    int fileCount = 0;
+                    foreach (string file in files)
+                    {
+                        FileInfo fi = new FileInfo(file);
+                        DateTime fCreation = fi.CreationTime;
+
+                        string fileInfoLine = string.Format("{0}    {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                        if (fileInfoLine.Length > 0)
+                        {
+                            fileCount += 1;
+                            stringStream.Write(fileInfoLine);
+                        }
+                    }
+
+                    stringStream.Write("\r\n");
+                    stringStream.Write("    {0} files\r\n", fileCount);
+                    stringStream.Write("    {0} bytes free\r\n", availableFreeSpace);
+                }
+
+                streamDir = File.OpenText(dirFilename);
+                if (streamDir != null)
+                {
+                    WriteByte((byte)'\r');
+                    WriteByte((byte)'\n');
+                    State = CONNECTION_STATE.SENDING_DIR;
+                }
+                else
+                {
+                    WriteByte(0x06);
+                    File.Delete(dirFilename);
+                    State = CONNECTION_STATE.CONNECTED;
+                }
+            }
+        }
+
+        public void StateConnectionStateSendingDir(int c)
+        {
+            if (c == ' ')
+            {
+                string line = streamDir.ReadLine();
+                if (line != null)
+                {
+                    WriteByte((byte)'\r', false);
+                    sp.Write(line);
+                    WriteByte((byte)'\n', false);
+                }
+                else
+                {
+                    streamDir.Dispose();
+                    streamDir = null;
+                    File.Delete(dirFilename);
+
+                    WriteByte(0x06);
+                    State = CONNECTION_STATE.CONNECTED;
+                }
+            }
+            else if (c == 0x1b)
+            {
+                WriteByte((byte)'\r', false);
+                WriteByte((byte)'\n', false);
+
+                streamDir.Dispose();
+                streamDir = null;
+                File.Delete(dirFilename);
+
+                WriteByte(0x06);
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
+
+        public void StateConnectionStateGetRequestedMountDrive(int c)
+        {
+            // Report which disk image is mounted to requested drive
+            currentDrive = c;
+
+            SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
+            Console.Write(currentWorkingDirectory);
+            Console.Write("\r");
+            Console.Write("\n");
+            SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
+
+            if (imageFile[currentDrive] == null)
+            {
+                imageFile[currentDrive] = new ImageFile();
+            }
+
+            if (imageFile[currentDrive].driveInfo.MountedFilename != null)
+            {
+                sp.Write(imageFile[currentDrive].driveInfo.MountedFilename);
+            }
+
+            WriteByte(0x0D, false);
+            WriteByte(0x06);
+
+            State = CONNECTION_STATE.CONNECTED;
+        }
+
+        public void StateConnectionStateGetTrack(int c)
+        {
+            imageFile[currentDrive].track = c;
+            State = CONNECTION_STATE.GET_SECTOR;
+        }
+
+        public void StateConnectionStateGetSector(int c)
+        {
+            imageFile[currentDrive].sector = c;
+
+            if (imageFile[currentDrive] == null)
+                imageFile[currentDrive] = new ImageFile();
+
+            if (imageFile[currentDrive].driveInfo.mode == (int)SECTOR_ACCESS_MODE.S_MODE)
+            {
+                Console.WriteLine("\r\nState is SENDING_SECTOR");
+                SendSector();
+                State = CONNECTION_STATE.WAIT_ACK;
+            }
+            else
+            {
+                sectorIndex = 0;
+                calculatedCRC = 0;
+                State = CONNECTION_STATE.RECEIVING_SECTOR;
+            }
+        }
+
+
+        public void StateConnectionStateCDGetFilename(int c)
+        {
+            if (c != 0x0d)
+                commandFilename += (char)c;
+            else
+            {
+                byte status;
+                try
+                {
+                    Directory.SetCurrentDirectory(commandFilename);
+                    status = 0x06;
+
+                    currentWorkingDirectory = Directory.GetCurrentDirectory();
+                    currentWorkingDirectory.TrimEnd('\\');
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                    status = 0x15;
+                }
+
+                WriteByte(status);
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
+
+
+        public void StateConnectionStateWaitACK(int c)
+        {
+            if (c == 0x06)
+            {
+                State = CONNECTION_STATE.CONNECTED;
+            }
+            else
+            {
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
+
 
         public byte MountImageFile(string fileName, int nDrive)
         {
