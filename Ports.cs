@@ -10,8 +10,8 @@ namespace FLEXNetSharp
         public Stream streamDir = null;
         public System.IO.Ports.SerialPort sp;
         public string       port;
-        public int          state;
-        public int          createState;
+        private CONNECTION_STATE state;
+        public CREATE_STATE createState;
         public int          rate;
         public string       speed;
         public string       verbose;
@@ -177,64 +177,55 @@ namespace FLEXNetSharp
             }
         }
 
-        public void SetState(int newState)
+        public CONNECTION_STATE State
         {
-            state = newState;
-            string statusLine = "";
+            get => state;
 
-            switch (newState)
+            set
             {
-                case (int)CONNECTION_STATE.NOT_CONNECTED:               statusLine = "State is NOT_CONNECTED"; break;
-                case (int)CONNECTION_STATE.SYNCRONIZING:                statusLine = "State is SYNCRONIZING"; break;
-                case (int)CONNECTION_STATE.CONNECTED:                   statusLine = "\nState is CONNECTED"; break;
-                case (int)CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:   statusLine = "State is GET_REQUESTED_MOUNT_DRIVE"; break;
-                case (int)CONNECTION_STATE.GET_READ_DRIVE:              statusLine = "State is GET_DRIVE"; break;
-                case (int)CONNECTION_STATE.GET_WRITE_DRIVE:             statusLine = "State is GET_DRIVE"; break;
-                case (int)CONNECTION_STATE.GET_MOUNT_DRIVE:             statusLine = "State is GET_MOUNT_DRIVE"; break;
-                case (int)CONNECTION_STATE.GET_CREATE_DRIVE:            statusLine = "State is GET_CREATE_DRIVE"; break;
-                case (int)CONNECTION_STATE.GET_TRACK:                   statusLine = "State is GET_TRACK"; break;
-                case (int)CONNECTION_STATE.GET_SECTOR:                  statusLine = "State is GET_SECTOR"; break;
-                case (int)CONNECTION_STATE.RECEIVING_SECTOR:            statusLine = "State is RECEIVING_SECTOR"; break;
-                case (int)CONNECTION_STATE.GET_CRC:                     statusLine = "State is GET_CRC"; break;
-                case (int)CONNECTION_STATE.MOUNT_GETFILENAME:           statusLine = "State is MOUNT_GETFILENAME"; break;
-                case (int)CONNECTION_STATE.WAIT_ACK:                    statusLine = "State is WAIT_ACK"; break;
-                case (int)CONNECTION_STATE.PROCESSING_MOUNT:            statusLine = "State is PROCESSING_MOUNT"; break;
-                case (int)CONNECTION_STATE.PROCESSING_DIR:              statusLine = "State is PROCESSING_DIR"; break;
-                case (int)CONNECTION_STATE.PROCESSING_LIST:             statusLine = "State is PROCESSING_LIST"; break;
-                case (int)CONNECTION_STATE.DELETE_GETFILENAME:          statusLine = "State is DELETE_GETFILENAME"; break;
-                case (int)CONNECTION_STATE.DIR_GETFILENAME:             statusLine = "State is DIR_GETFILENAME"; break;
-                case (int)CONNECTION_STATE.CD_GETFILENAME:              statusLine = "State is CD_GETFILENAME"; break;
-                case (int)CONNECTION_STATE.DRIVE_GETFILENAME:           statusLine = "State is DRIVE_GETFILENAME"; break;
-                case (int)CONNECTION_STATE.SENDING_DIR:                 statusLine = "State is SENDING_DIR"; break;
+                state = value;
 
-                case (int)CONNECTION_STATE.CREATE_GETPARAMETERS:
-                    switch (createState)
-                    {
-                        case (int)CREATE_STATE.GET_CREATE_PATH:
-                            statusLine = "State is CREATE_GETPARAMETERS GET_CREATE_PATH";
-                            break;
-                        case (int)CREATE_STATE.GET_CREATE_NAME:
-                            statusLine = "State is CREATE_GETPARAMETERS GET_CREATE_NAME";
-                            break;
-                        case (int)CREATE_STATE.GET_CREATE_VOLUME:
-                            statusLine = "State is CREATE_GETPARAMETERS GET_CREATE_VOLUME";
-                            break;
-                        case (int)CREATE_STATE.GET_CREATE_TRACK_COUNT:
-                            statusLine = "State is CREATE_GETPARAMETERS GET_CREATE_TRACK_COUNT";
-                            break;
-                        case (int)CREATE_STATE.GET_CREATE_SECTOR_COUNT:
-                            statusLine = "State is CREATE_GETPARAMETERS GET_CREATE_SECTOR_COUNT";
-                            break;
-                        case (int)CREATE_STATE.CREATE_THE_IMAGE:
-                            statusLine = "State is CREATE_GETPARAMETERS CREATE_THE_IMAGE";
-                            break;
-                    }
+                DisplayState(state);
+            }
+        }
+
+        private void DisplayState(CONNECTION_STATE displayState)
+        {
+            switch (displayState)
+            {
+                case CONNECTION_STATE.NOT_CONNECTED:
+                case CONNECTION_STATE.SYNCRONIZING:
+                case CONNECTION_STATE.CONNECTED:
+                case CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:
+                case CONNECTION_STATE.GET_READ_DRIVE:
+                case CONNECTION_STATE.GET_WRITE_DRIVE:
+                case CONNECTION_STATE.GET_MOUNT_DRIVE:
+                case CONNECTION_STATE.GET_CREATE_DRIVE:
+                case CONNECTION_STATE.GET_TRACK:
+                case CONNECTION_STATE.GET_SECTOR:
+                case CONNECTION_STATE.RECEIVING_SECTOR:
+                case CONNECTION_STATE.GET_CRC:
+                case CONNECTION_STATE.MOUNT_GETFILENAME:
+                case CONNECTION_STATE.WAIT_ACK:
+                case CONNECTION_STATE.PROCESSING_MOUNT:
+                case CONNECTION_STATE.PROCESSING_DIR:
+                case CONNECTION_STATE.PROCESSING_LIST:
+                case CONNECTION_STATE.DELETE_GETFILENAME:
+                case CONNECTION_STATE.DIR_GETFILENAME:
+                case CONNECTION_STATE.CD_GETFILENAME:
+                case CONNECTION_STATE.DRIVE_GETFILENAME:
+                case CONNECTION_STATE.SENDING_DIR:
+                    Console.WriteLine($"State is {state}");
                     break;
 
-                default: statusLine = "State is UNKNOWN - [" + newState.ToString("X2") + "]"; break;
-            }
+                case CONNECTION_STATE.CREATE_GETPARAMETERS:
+                    Console.WriteLine($"State is {displayState} {createState}");
+                    break;
 
-            Console.WriteLine("\n" + statusLine);
+                default:
+                    Console.WriteLine($"State is UNHANDLED {displayState} - {(int)state:X2}");
+                    break;
+            }
         }
 
         public byte MountImageFile(string fileName, int nDrive)
@@ -271,6 +262,11 @@ namespace FLEXNetSharp
                         Console.WriteLine(eIn);
                         c = 0x15;
                     }
+                }
+                catch (FileNotFoundException fn)
+                {
+                    Console.WriteLine("Failed to find file {0} file not mounted", fn.FileName);
+                    c = 0x15;
                 }
                 catch (Exception e)
                 {

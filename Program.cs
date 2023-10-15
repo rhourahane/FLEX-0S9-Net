@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Globalization;
-using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using System.Xml;
@@ -20,43 +19,6 @@ enum SECTOR_ACCESS_MODE
 {
     S_MODE = 0,
     R_MODE
-};
-
-enum CONNECTION_STATE
-{
-    NOT_CONNECTED = -1,
-    SYNCRONIZING,
-    CONNECTED,
-    GET_REQUESTED_MOUNT_DRIVE,
-    GET_READ_DRIVE,
-    GET_WRITE_DRIVE,
-    GET_MOUNT_DRIVE,
-    GET_CREATE_DRIVE,
-    GET_TRACK,
-    GET_SECTOR,
-    RECEIVING_SECTOR,
-    GET_CRC,
-    MOUNT_GETFILENAME,
-    DELETE_GETFILENAME,
-    DIR_GETFILENAME,
-    CD_GETFILENAME,
-    DRIVE_GETFILENAME,
-    SENDING_DIR,
-    CREATE_GETPARAMETERS,
-    WAIT_ACK,
-    PROCESSING_MOUNT,
-    PROCESSING_DIR,
-    PROCESSING_LIST
-};
-
-enum CREATE_STATE
-{
-    GET_CREATE_PATH = 0,
-    GET_CREATE_NAME,
-    GET_CREATE_VOLUME,
-    GET_CREATE_TRACK_COUNT,
-    GET_CREATE_SECTOR_COUNT,
-    CREATE_THE_IMAGE
 };
 public enum FileFormat
 {
@@ -103,12 +65,22 @@ namespace FLEXNetSharp
         static List<Ports> listPorts = new List<Ports>();
         static CultureInfo ci = new CultureInfo("en-us");
 
-        static void ParseConfigFile()
+        static void ParseConfigFile(string[] args)
         {
             string applicationPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string configPath;
+
+            if (args.Length > 0)
+            {
+                configPath = args[0];
+            }
+            else
+            {
+                configPath = Path.Combine(applicationPath, "fnconfig.xml");
+            }
 
             XmlDocument doc = new XmlDocument();
-            doc.Load(Path.Combine(applicationPath, "fnconfig.xml"));
+            doc.Load(configPath);
 
             foreach (XmlNode node in doc.DocumentElement.ChildNodes)
             {
@@ -208,13 +180,11 @@ namespace FLEXNetSharp
         }
 
 
-        // Waiting for Sync Byte
-
         static void StateConnectionStateNotConnected(Ports serialPort, int c)
         {
             if (c == 0x55)
             {
-                serialPort.SetState((int)CONNECTION_STATE.SYNCRONIZING);
+                serialPort.State = CONNECTION_STATE.SYNCRONIZING;
                 serialPort.WriteByte((byte)0x55);
             }
         }
@@ -228,11 +198,11 @@ namespace FLEXNetSharp
                 if (c == 0xAA)
                 {
                     serialPort.WriteByte((byte)0xAA);
-                    serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                    serialPort.State = CONNECTION_STATE.CONNECTED;
                 }
                 else
                 {
-                    serialPort.SetState((int)CONNECTION_STATE.NOT_CONNECTED);
+                    serialPort.State = CONNECTION_STATE.NOT_CONNECTED;
                 }
             }
         }
@@ -247,7 +217,7 @@ namespace FLEXNetSharp
                 Console.Write(string.Format("{0} ", c.ToString("X2")));
                 serialPort.SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
 
-                serialPort.SetState((int)CONNECTION_STATE.SYNCRONIZING);
+                serialPort.State = CONNECTION_STATE.SYNCRONIZING;
                 serialPort.WriteByte((byte)0x55);
             }
             else if (c == '?')
@@ -272,7 +242,7 @@ namespace FLEXNetSharp
 
                 serialPort.imageFile[serialPort.currentDrive].trackAndSectorAreTrackAndSector = true;
                 serialPort.imageFile[serialPort.currentDrive].driveInfo.mode = (int)SECTOR_ACCESS_MODE.S_MODE;
-                serialPort.SetState((int)CONNECTION_STATE.GET_TRACK);
+                serialPort.State = CONNECTION_STATE.GET_TRACK;
             }
             else if (c == 'R')      // used by FLEX to write a sector to the PC
             {
@@ -283,13 +253,13 @@ namespace FLEXNetSharp
 
                 serialPort.imageFile[serialPort.currentDrive].trackAndSectorAreTrackAndSector = true;
                 serialPort.imageFile[serialPort.currentDrive].driveInfo.mode = (int)SECTOR_ACCESS_MODE.R_MODE;
-                serialPort.SetState((int)CONNECTION_STATE.GET_TRACK);
+                serialPort.State = CONNECTION_STATE.GET_TRACK;
             }
             else if (c == 'E')
             {
                 // Exit
 
-                serialPort.SetState((int)CONNECTION_STATE.NOT_CONNECTED);
+                serialPort.State = CONNECTION_STATE.NOT_CONNECTED;
                 serialPort.WriteByte((byte)0x06);
                 if (shutDown == "T")
                     done = true;
@@ -301,21 +271,21 @@ namespace FLEXNetSharp
             else if (c == 'M')          // Mount drive image
             {
                 serialPort.commandFilename = "";
-                serialPort.SetState((int)CONNECTION_STATE.MOUNT_GETFILENAME);
+                serialPort.State = CONNECTION_STATE.MOUNT_GETFILENAME;
             }
             else if (c == 'D')
             {
                 // Delete file command
 
                 serialPort.commandFilename = "";
-                serialPort.SetState((int)CONNECTION_STATE.DELETE_GETFILENAME);
+                serialPort.State = CONNECTION_STATE.DELETE_GETFILENAME;
             }
             else if (c == 'A')
             {
                 // Dir file command
 
                 serialPort.commandFilename = "";
-                serialPort.SetState((int)CONNECTION_STATE.DIR_GETFILENAME);
+                serialPort.State = CONNECTION_STATE.DIR_GETFILENAME;
             }
             else if (c == 'I')
             {
@@ -382,7 +352,7 @@ namespace FLEXNetSharp
                     serialPort.streamDir = File.Open(serialPort.dirFilename, FileMode.Open, FileAccess.Read, FileShare.Read);
                     serialPort.WriteByte((byte)'\r', false);
                     serialPort.WriteByte((byte)'\n', false);
-                    serialPort.SetState((int)CONNECTION_STATE.SENDING_DIR);
+                    serialPort.State = CONNECTION_STATE.SENDING_DIR;
                 }
                 catch (Exception e)
                 {
@@ -391,7 +361,7 @@ namespace FLEXNetSharp
                     File.Delete(serialPort.dirFilename);
 
                     serialPort.WriteByte((byte)0x06);
-                    serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                    serialPort.State = CONNECTION_STATE.CONNECTED;
                 }
             }
             else if (c == 'P')
@@ -399,14 +369,14 @@ namespace FLEXNetSharp
                 // Change Directory
 
                 serialPort.commandFilename = "";
-                serialPort.SetState((int)CONNECTION_STATE.CD_GETFILENAME);
+                serialPort.State = CONNECTION_STATE.CD_GETFILENAME;
             }
             else if (c == 'V')
             {
                 // Change Drive (and optionally the directory)
 
                 serialPort.commandFilename = "";
-                serialPort.SetState((int)CONNECTION_STATE.DRIVE_GETFILENAME);
+                serialPort.State = CONNECTION_STATE.DRIVE_GETFILENAME;
             }
             else if (c == 'C')
             {
@@ -418,8 +388,8 @@ namespace FLEXNetSharp
                 serialPort.createTrackCount = "";
                 serialPort.createSectorCount = "";
 
-                serialPort.SetState((int)CONNECTION_STATE.CREATE_GETPARAMETERS);
-                serialPort.createState = (int)CREATE_STATE.GET_CREATE_PATH;
+                serialPort.State = CONNECTION_STATE.CREATE_GETPARAMETERS;
+                serialPort.createState = CREATE_STATE.GET_CREATE_PATH;
             }
 
             // now the Extended multi drive versions - these are what makes FLEXNet different from NETPC.
@@ -432,13 +402,13 @@ namespace FLEXNetSharp
             {
                 // 's'end Sector Request with drive
 
-                serialPort.SetState((int)CONNECTION_STATE.GET_READ_DRIVE);
+                serialPort.State = CONNECTION_STATE.GET_READ_DRIVE;
             }
             else if (c == 'r')
             {
                 // 'r'eceive Sector Request with drive
 
-                serialPort.SetState((int)CONNECTION_STATE.GET_WRITE_DRIVE);
+                serialPort.State = CONNECTION_STATE.GET_WRITE_DRIVE;
             }
             else if (c == ('s' | 0x80))     // used by OS9 to read a sector from the PC - track and sector are LBN
             {
@@ -449,7 +419,7 @@ namespace FLEXNetSharp
 
                 serialPort.imageFile[serialPort.currentDrive].trackAndSectorAreTrackAndSector = false;
 
-                serialPort.SetState((int)CONNECTION_STATE.GET_READ_DRIVE);
+                serialPort.State = CONNECTION_STATE.GET_READ_DRIVE;
             }
             else if (c == ('r' | 0x80))      // used by OS9 to write a sector to the PC- track and sector are LBN
             {
@@ -460,16 +430,16 @@ namespace FLEXNetSharp
 
                 serialPort.imageFile[serialPort.currentDrive].trackAndSectorAreTrackAndSector = false;
 
-                serialPort.SetState((int)CONNECTION_STATE.GET_WRITE_DRIVE);
+                serialPort.State = CONNECTION_STATE.GET_WRITE_DRIVE;
             }
             else if (c == 'm')      // Mount drive image with drive
             {
                 serialPort.commandFilename = "";
-                serialPort.SetState((int)CONNECTION_STATE.GET_MOUNT_DRIVE);
+                serialPort.State = CONNECTION_STATE.GET_MOUNT_DRIVE;
             }
             else if (c == 'd')      // Report which disk image is mounted to requested drive
             {
-                serialPort.SetState((int)CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE);
+                serialPort.State = CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE;
             }
             else if (c == 'c')      // Create a drive image
             {
@@ -479,14 +449,14 @@ namespace FLEXNetSharp
                 serialPort.createTrackCount = "";
                 serialPort.createSectorCount = "";
 
-                serialPort.SetState((int)CONNECTION_STATE.GET_CREATE_DRIVE);
-                serialPort.createState = (int)CREATE_STATE.GET_CREATE_PATH;
+                serialPort.State = CONNECTION_STATE.GET_CREATE_DRIVE;
+                serialPort.createState = CREATE_STATE.GET_CREATE_PATH;
             }
 
             else                    // Unknown - command - go back to (int)CONNECTION_STATE.CONNECTED
             {
-                if (serialPort.state != (int)CONNECTION_STATE.CONNECTED)
-                    serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                if (serialPort.State != CONNECTION_STATE.CONNECTED)
+                    serialPort.State = CONNECTION_STATE.CONNECTED;
 
                 if (c != 0x20)
                 {
@@ -522,7 +492,7 @@ namespace FLEXNetSharp
             serialPort.WriteByte(0x0D, false);
             serialPort.WriteByte(0x06);
 
-            serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+            serialPort.State = CONNECTION_STATE.CONNECTED;
         }
 
         // 's'end Sector Request with drive - this state gets the drive number
@@ -535,7 +505,7 @@ namespace FLEXNetSharp
                 serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
 
             serialPort.imageFile[serialPort.currentDrive].driveInfo.mode = (int)SECTOR_ACCESS_MODE.S_MODE;
-            serialPort.SetState((int)CONNECTION_STATE.GET_TRACK);
+            serialPort.State = CONNECTION_STATE.GET_TRACK;
         }
 
         static void StateConnectionStateGetWriteDrive(Ports serialPort, int c)
@@ -546,25 +516,25 @@ namespace FLEXNetSharp
                 serialPort.imageFile[serialPort.currentDrive] = new ImageFile();
 
             serialPort.imageFile[serialPort.currentDrive].driveInfo.mode = (int)SECTOR_ACCESS_MODE.R_MODE;
-            serialPort.SetState((int)CONNECTION_STATE.GET_TRACK);
+            serialPort.State = CONNECTION_STATE.GET_TRACK;
         }
 
         static void StateConnectionStateGetMountDrive(Ports serialPort, int c)
         {
             serialPort.currentDrive = c;
-            serialPort.SetState((int)CONNECTION_STATE.MOUNT_GETFILENAME);
+            serialPort.State = CONNECTION_STATE.MOUNT_GETFILENAME;
         }
 
         static void StateConnectionStateGetCreateDrive(Ports serialPort, int c)
         {
             serialPort.currentDrive = c;
-            serialPort.SetState((int)CONNECTION_STATE.CREATE_GETPARAMETERS);
+            serialPort.State = CONNECTION_STATE.CREATE_GETPARAMETERS;
         }
 
         static void StateConnectionStateGetTrack(Ports serialPort, int c)
         {
             serialPort.imageFile[serialPort.currentDrive].track = c;
-            serialPort.SetState((int)CONNECTION_STATE.GET_SECTOR);
+            serialPort.State = CONNECTION_STATE.GET_SECTOR;
         }
 
         static void StateConnectionStateGetSector(Ports serialPort, int c)
@@ -578,13 +548,13 @@ namespace FLEXNetSharp
             {
                 Console.WriteLine("\r\nState is SENDING_SECTOR");
                 serialPort.SendSector();
-                serialPort.SetState((int)CONNECTION_STATE.WAIT_ACK);
+                serialPort.State = CONNECTION_STATE.WAIT_ACK;
             }
             else
             {
                 serialPort.sectorIndex = 0;
                 serialPort.calculatedCRC = 0;
-                serialPort.SetState((int)CONNECTION_STATE.RECEIVING_SECTOR);
+                serialPort.State = CONNECTION_STATE.RECEIVING_SECTOR;
             }
         }
 
@@ -596,7 +566,7 @@ namespace FLEXNetSharp
             if (serialPort.sectorIndex >= 256)
             {
                 serialPort.checksumIndex = 0;
-                serialPort.SetState((int)CONNECTION_STATE.GET_CRC);
+                serialPort.State = CONNECTION_STATE.GET_CRC;
             }
         }
 
@@ -610,7 +580,7 @@ namespace FLEXNetSharp
 
                 byte status = serialPort.WriteSector();
                 serialPort.WriteByte(status);
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
             }
         }
 
@@ -660,7 +630,7 @@ namespace FLEXNetSharp
                     }
                 }
                 serialPort.WriteByte(cMode);
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
             }
         }
 
@@ -790,13 +760,13 @@ namespace FLEXNetSharp
                 {
                     serialPort.WriteByte((byte)'\r');
                     serialPort.WriteByte((byte)'\n');
-                    serialPort.SetState((int)CONNECTION_STATE.SENDING_DIR);
+                    serialPort.State = CONNECTION_STATE.SENDING_DIR;
                 }
                 else
                 {
                     serialPort.WriteByte(0x06);
                     File.Delete(serialPort.dirFilename);
-                    serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                    serialPort.State = CONNECTION_STATE.CONNECTED;
                 }
             }
         }
@@ -824,7 +794,7 @@ namespace FLEXNetSharp
                 }
 
                 serialPort.WriteByte(status);
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
             }
         }
 
@@ -854,7 +824,7 @@ namespace FLEXNetSharp
                 Console.Write(status.ToString("X2", ci) + " ");
                 serialPort.SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
 
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
             }
         }
 
@@ -883,7 +853,7 @@ namespace FLEXNetSharp
                     File.Delete(serialPort.dirFilename);
 
                     serialPort.WriteByte(0x06);
-                    serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                    serialPort.State = CONNECTION_STATE.CONNECTED;
                 }
             }
             else if (c == 0x1b)
@@ -896,7 +866,7 @@ namespace FLEXNetSharp
                 File.Delete(serialPort.dirFilename);
 
                 serialPort.WriteByte(0x06);
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
             }
         }
 
@@ -906,32 +876,32 @@ namespace FLEXNetSharp
             {
                 switch (serialPort.createState)
                 {
-                    case (int)CREATE_STATE.GET_CREATE_PATH:
+                    case CREATE_STATE.GET_CREATE_PATH:
                         serialPort.createPath += (char)c;
                         break;
-                    case (int)CREATE_STATE.GET_CREATE_NAME:
+                    case CREATE_STATE.GET_CREATE_NAME:
                         serialPort.createFilename += (char)c;
                         break;
-                    case (int)CREATE_STATE.GET_CREATE_VOLUME:
+                    case CREATE_STATE.GET_CREATE_VOLUME:
                         serialPort.createVolumeNumber += (char)c;
                         break;
-                    case (int)CREATE_STATE.GET_CREATE_TRACK_COUNT:
+                    case CREATE_STATE.GET_CREATE_TRACK_COUNT:
                         serialPort.createTrackCount += (char)c;
                         break;
-                    case (int)CREATE_STATE.GET_CREATE_SECTOR_COUNT:
+                    case CREATE_STATE.GET_CREATE_SECTOR_COUNT:
                         serialPort.createSectorCount += (char)c;
                         break;
                     default:
-                        serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                        serialPort.State = CONNECTION_STATE.CONNECTED;
                         break;
                 }
             }
             else
             {
-                if (serialPort.createState != (int)CREATE_STATE.GET_CREATE_SECTOR_COUNT)
+                if (serialPort.createState != CREATE_STATE.GET_CREATE_SECTOR_COUNT)
                 {
                     serialPort.createState++;
-                    serialPort.SetState((int)CONNECTION_STATE.CREATE_GETPARAMETERS);
+                    serialPort.State = CONNECTION_STATE.CREATE_GETPARAMETERS;
                 }
                 else
                 {
@@ -974,7 +944,7 @@ namespace FLEXNetSharp
                     //        }
                     //    }
                     //}
-                    serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                    serialPort.State = CONNECTION_STATE.CONNECTED;
                 }
             }
         }
@@ -984,7 +954,7 @@ namespace FLEXNetSharp
             //*StatusLine << '\n' << "State is WAIT_ACK";
 
             if (c == 0x06)
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
             //else if (c == 's')
             //{
             //    // 's'end Sector Request with drive
@@ -992,13 +962,13 @@ namespace FLEXNetSharp
             //    serialPort.SetState((int)CONNECTION_STATE.GET_READ_DRIVE);
             //}
             else
-                serialPort.SetState((int)CONNECTION_STATE.CONNECTED);
+                serialPort.State = CONNECTION_STATE.CONNECTED;
         }
 
-        static void InitializeFromConfigFile()
+        static void InitializeFromConfigFile(string[] args)
         {
 
-            ParseConfigFile();
+            ParseConfigFile(args);
 
             foreach (Ports serialPort in listPorts)
             {
@@ -1036,7 +1006,7 @@ namespace FLEXNetSharp
                     }
                 }
 
-                serialPort.SetState((int)CONNECTION_STATE.NOT_CONNECTED);
+                serialPort.State = CONNECTION_STATE.NOT_CONNECTED;
 
                 foreach (ImageFile imageFile in serialPort.imageFile)
                 {
@@ -1047,7 +1017,7 @@ namespace FLEXNetSharp
                     nIndex++;
                 }
 
-                Console.WriteLine(string.Format("COM{0} parameters:", serialPort.port));
+                Console.WriteLine(string.Format("{0} parameters:", serialPort.port));
                 Console.WriteLine(string.Format("    Rate:              {0}", serialPort.rate));
                 Console.WriteLine(string.Format("    Verbose:           {0}", serialPort.verbose));
                 Console.WriteLine(string.Format("    AutoMount:         {0}", serialPort.autoMount));
@@ -1080,7 +1050,8 @@ namespace FLEXNetSharp
                         {
                             int c = serialPort.sp.ReadByte();
 
-                            if (((serialPort.state != (int)CONNECTION_STATE.RECEIVING_SECTOR) && (serialPort.state != (int)CONNECTION_STATE.GET_CRC)))
+                            if ((serialPort.State != CONNECTION_STATE.RECEIVING_SECTOR) &&
+                                (serialPort.State != CONNECTION_STATE.GET_CRC))
                             {
                                 //if ((!lastActivityWasServer && !lastActivityWasClient) || lastActivityWasServer)
                                 //{
@@ -1094,30 +1065,30 @@ namespace FLEXNetSharp
                                 //lastActivityWasClient = true;
                             }
 
-                            switch (serialPort.state)
+                            switch (serialPort.State)
                             {
-                                case (int)CONNECTION_STATE.NOT_CONNECTED:               StateConnectionStateNotConnected            (serialPort, c); break;
-                                case (int)CONNECTION_STATE.SYNCRONIZING:                StateConnectionStateSynchronizing           (serialPort, c); break;
-                                case (int)CONNECTION_STATE.CONNECTED:                   StateConnectionStateConnected               (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:   StateConnectionStateGetRequestedMountDrive  (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_READ_DRIVE:              StateConnectionStateGetReadDrive            (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_WRITE_DRIVE:             StateConnectionStateGetWriteDrive           (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_MOUNT_DRIVE:             StateConnectionStateGetMountDrive           (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_CREATE_DRIVE:            StateConnectionStateGetCreateDrive          (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_TRACK:                   StateConnectionStateGetTrack                (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_SECTOR:                  StateConnectionStateGetSector               (serialPort, c); break;
-                                case (int)CONNECTION_STATE.RECEIVING_SECTOR:            StateConnectionStateRecievingSector         (serialPort, c); break;
-                                case (int)CONNECTION_STATE.GET_CRC:                     StateConnectionStateGetCRC                  (serialPort, c); break;
-                                case (int)CONNECTION_STATE.MOUNT_GETFILENAME:           StateConnectionStateMountGetFilename        (serialPort, c); break;
-                                case (int)CONNECTION_STATE.DELETE_GETFILENAME:          StateConnectionStateDeleteGetFilename       (serialPort, c); break;
-                                case (int)CONNECTION_STATE.DIR_GETFILENAME:             StateConnectionStateDirGetFilename          (serialPort, c); break;
-                                case (int)CONNECTION_STATE.CD_GETFILENAME:              StateConnectionStateCDGetFilename           (serialPort, c); break;
-                                case (int)CONNECTION_STATE.DRIVE_GETFILENAME:           StateConnectionStateDriveGetFilename        (serialPort, c); break;
-                                case (int)CONNECTION_STATE.SENDING_DIR:                 StateConnectionStateSendingDir              (serialPort, c); break;
-                                case (int)CONNECTION_STATE.CREATE_GETPARAMETERS:        StateConnectionStateCreateGetParameters     (serialPort, c); break;
-                                case (int)CONNECTION_STATE.WAIT_ACK:                    StateConnectionStateWaitACK                 (serialPort, c); break;
+                                case CONNECTION_STATE.NOT_CONNECTED:               StateConnectionStateNotConnected            (serialPort, c); break;
+                                case CONNECTION_STATE.SYNCRONIZING:                StateConnectionStateSynchronizing           (serialPort, c); break;
+                                case CONNECTION_STATE.CONNECTED:                   StateConnectionStateConnected               (serialPort, c); break;
+                                case CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:   StateConnectionStateGetRequestedMountDrive  (serialPort, c); break;
+                                case CONNECTION_STATE.GET_READ_DRIVE:              StateConnectionStateGetReadDrive            (serialPort, c); break;
+                                case CONNECTION_STATE.GET_WRITE_DRIVE:             StateConnectionStateGetWriteDrive           (serialPort, c); break;
+                                case CONNECTION_STATE.GET_MOUNT_DRIVE:             StateConnectionStateGetMountDrive           (serialPort, c); break;
+                                case CONNECTION_STATE.GET_CREATE_DRIVE:            StateConnectionStateGetCreateDrive          (serialPort, c); break;
+                                case CONNECTION_STATE.GET_TRACK:                   StateConnectionStateGetTrack                (serialPort, c); break;
+                                case CONNECTION_STATE.GET_SECTOR:                  StateConnectionStateGetSector               (serialPort, c); break;
+                                case CONNECTION_STATE.RECEIVING_SECTOR:            StateConnectionStateRecievingSector         (serialPort, c); break;
+                                case CONNECTION_STATE.GET_CRC:                     StateConnectionStateGetCRC                  (serialPort, c); break;
+                                case CONNECTION_STATE.MOUNT_GETFILENAME:           StateConnectionStateMountGetFilename        (serialPort, c); break;
+                                case CONNECTION_STATE.DELETE_GETFILENAME:          StateConnectionStateDeleteGetFilename       (serialPort, c); break;
+                                case CONNECTION_STATE.DIR_GETFILENAME:             StateConnectionStateDirGetFilename          (serialPort, c); break;
+                                case CONNECTION_STATE.CD_GETFILENAME:              StateConnectionStateCDGetFilename           (serialPort, c); break;
+                                case CONNECTION_STATE.DRIVE_GETFILENAME:           StateConnectionStateDriveGetFilename        (serialPort, c); break;
+                                case CONNECTION_STATE.SENDING_DIR:                 StateConnectionStateSendingDir              (serialPort, c); break;
+                                case CONNECTION_STATE.CREATE_GETPARAMETERS:        StateConnectionStateCreateGetParameters     (serialPort, c); break;
+                                case CONNECTION_STATE.WAIT_ACK:                    StateConnectionStateWaitACK                 (serialPort, c); break;
                                 default:
-                                    serialPort.SetState((int)CONNECTION_STATE.NOT_CONNECTED);
+                                    serialPort.State = CONNECTION_STATE.NOT_CONNECTED   ;
                                     //sprintf (szHexTemp, "%02X", c);
                                     //*StatusLine << '\n' << "State is reset to NOT_CONNECTED - Unknown STATE " << szHexTemp;
                                     break;
@@ -1134,7 +1105,7 @@ namespace FLEXNetSharp
 
         static void Main(string[] args)
         {
-            InitializeFromConfigFile();
+            InitializeFromConfigFile(args);
             ProcessRequests();
         }
     }
