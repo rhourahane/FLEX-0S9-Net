@@ -2,6 +2,7 @@
 using System.Globalization;
 
 using System.IO;
+using System.IO.Ports;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -393,6 +394,33 @@ namespace FLEXNetSharp
             State = CONNECTION_STATE.CONNECTED;
         }
 
+        public void StateConnectionStateGetReadDrive(int c)
+        {
+            currentDrive = c;
+
+            if (imageFile[currentDrive] == null)
+                imageFile[currentDrive] = new ImageFile();
+
+            imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.S_MODE;
+            State = CONNECTION_STATE.GET_TRACK;
+        }
+        public void StateConnectionStateGetWriteDrive(int c)
+        {
+            currentDrive = c;
+
+            if (imageFile[currentDrive] == null)
+                imageFile[currentDrive] = new ImageFile();
+
+            imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.R_MODE;
+            State = CONNECTION_STATE.GET_TRACK;
+        }
+
+        public void StateConnectionStateGetMountDrive(int c)
+        {
+            currentDrive = c;
+            State = CONNECTION_STATE.MOUNT_GETFILENAME;
+        }
+
         public void StateConnectionStateGetTrack(int c)
         {
             imageFile[currentDrive].track = c;
@@ -406,7 +434,7 @@ namespace FLEXNetSharp
             if (imageFile[currentDrive] == null)
                 imageFile[currentDrive] = new ImageFile();
 
-            if (imageFile[currentDrive].driveInfo.mode == (int)SECTOR_ACCESS_MODE.S_MODE)
+            if (imageFile[currentDrive].driveInfo.mode == SECTOR_ACCESS_MODE.S_MODE)
             {
                 Console.WriteLine("\r\nState is SENDING_SECTOR");
                 SendSector();
@@ -420,6 +448,23 @@ namespace FLEXNetSharp
             }
         }
 
+        public void StateConnectionStateGetCreateDrive(int c)
+        {
+            currentDrive = c;
+            State = CONNECTION_STATE.CREATE_GETPARAMETERS;
+        }
+
+        public void StateConnectionStateRecievingSector(int c)
+        {
+            sectorBuffer[sectorIndex++] = (byte)c;
+            calculatedCRC += c;
+
+            if (sectorIndex >= 256)
+            {
+                checksumIndex = 0;
+                State = CONNECTION_STATE.GET_CRC;
+            }
+        }
 
         public void StateConnectionStateCDGetFilename(int c)
         {
@@ -447,6 +492,19 @@ namespace FLEXNetSharp
             }
         }
 
+        public void StateConnectionStateGetCRC(int c)
+        {
+            if (checksumIndex++ == 0)
+                checksum = c * 256;
+            else
+            {
+                checksum += c;
+
+                byte status = WriteSector();
+                WriteByte(status);
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
 
         public void StateConnectionStateWaitACK(int c)
         {
@@ -460,6 +518,227 @@ namespace FLEXNetSharp
             }
         }
 
+        public void StateConnectionStateMountGetFilename(int c)
+        {
+            if (imageFile[currentDrive] == null)
+                imageFile[currentDrive] = new ImageFile();
+
+            if (c != 0x0d)
+            {
+                // just add the character to the filename
+                commandFilename += (char)c;
+            }
+            else
+            {
+                commandFilename += ".DSK";
+
+                // this should close any file that is currently open for this port/drive
+                if (imageFile[currentDrive] != null)
+                {
+                    if (imageFile[currentDrive].stream != null)
+                    {
+                        imageFile[currentDrive].stream.Close();
+                        imageFile[currentDrive].stream = null;
+                    }
+                }
+
+                // Now mount the new file
+
+                byte status = 0x06;
+                if (commandFilename.Length > 0)
+                {
+                    Console.WriteLine();
+                    status = MountImageFile(commandFilename, currentDrive);
+                }
+
+                WriteByte(status);
+
+                byte cMode = (byte)'W';
+                if (imageFile[currentDrive] != null)
+                {
+                    if (imageFile[currentDrive].readOnly)
+                    {
+                        cMode = (byte)'R';
+                    }
+                }
+                WriteByte(cMode);
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
+
+        public void StateConnectionStateDriveGetFilename(int c)
+        {
+            if (c != 0x0d)
+            {
+                commandFilename += (char)c;
+            }
+            else
+            {
+                byte status;
+
+                try
+                {
+                    Directory.SetCurrentDirectory(commandFilename);
+                    status = 0x06;
+
+                    currentWorkingDirectory = Directory.GetCurrentDirectory();
+                    currentWorkingDirectory.TrimEnd('\\');
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                    status = 0x15;
+                }
+
+                SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
+                Console.Write("{0:X2} ", status);
+                SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
+
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
+
+        public void StateConnectionStateCreateGetParameters(int c)
+        {
+            if (c != 0x0d)
+            {
+                switch (createState)
+                {
+                    case CREATE_STATE.GET_CREATE_PATH:
+                        createPath += (char)c;
+                        break;
+                    case CREATE_STATE.GET_CREATE_NAME:
+                        createFilename += (char)c;
+                        break;
+                    case CREATE_STATE.GET_CREATE_VOLUME:
+                        createVolumeNumber += (char)c;
+                        break;
+                    case CREATE_STATE.GET_CREATE_TRACK_COUNT:
+                        createTrackCount += (char)c;
+                        break;
+                    case CREATE_STATE.GET_CREATE_SECTOR_COUNT:
+                        createSectorCount += (char)c;
+                        break;
+                    default:
+                        State = CONNECTION_STATE.CONNECTED;
+                        break;
+                }
+            }
+            else
+            {
+                if (createState != CREATE_STATE.GET_CREATE_SECTOR_COUNT)
+                {
+                    createState++;
+                    State = CONNECTION_STATE.CREATE_GETPARAMETERS;
+                }
+                else
+                {
+                    string fullFilename = createPath + "/" + createFilename + ".DSK";
+
+                    byte status;
+                    Console.Write("\n" + "Creating Image File " + fullFilename);
+                    status = CreateImageFile();
+                    WriteByte(status);
+
+                    // Cannot automount because we do not know what drive to mount image too.
+                    //
+                    //if (autoMount.ToUpper() == "T" || autoMount.ToUpper() == "Y")
+                    //{
+                    //    if (createPath ==  ".")
+                    //    {
+                    //        if (imageFile[currentDrive].stream != null)
+                    //        {
+                    //            imageFile[currentDrive].stream.Close();
+                    //            imageFile[currentDrive].stream = null;
+                    //        }
+
+                    //        MountImageFile(currentWorkingDirectory + "/" + createFilename + ".DSK", currentDrive);
+                    //    }
+                    //    else
+                    //    {
+                    //        try
+                    //        {
+                    //            Directory.SetCurrentDirectory(createPath);
+                    //            if (imageFile[currentDrive].stream != null)
+                    //            {
+                    //                imageFile[currentDrive].stream.Close();
+                    //                imageFile[currentDrive].stream = null;
+                    //            }
+
+                    //            MountImageFile(createPath + "/" + createFilename + ".DSK", currentDrive);
+                    //        }
+                    //        catch
+                    //        {
+                    //        }
+                    //    }
+                    //}
+                    State = CONNECTION_STATE.CONNECTED;
+                }
+            }
+        }
+        public void StateConnectionStateDeleteGetFilename(int c)
+        {
+            //    if (c != 0x0d)
+            //        commandFilename[nCommandFilenameIndex++] = c;
+            //    else
+            //    {
+            //        strcpy (szFileToDelete, currentWorkingDirectory );
+            //        if ((strlen ((char*)commandFilename) + strlen (szFileToDelete)) < 126)
+            //        {
+            //            strcat (szFileToDelete, "/");
+            //            strcat (szFileToDelete, (char*)commandFilename);
+
+            //            int nStatus = -1;
+
+            //            // do not attempt to delete if the file is mounted
+
+            //            for (int i = 0; i < (int) strlen (szFileToDelete); i++)
+            //            {
+            //                if (szFileToDelete[i] >= 'A' && szFileToDelete[i] <= 'Z')
+            //                    szFileToDelete[i] = szFileToDelete[i] & 0x5F;
+            //            }
+
+            //            if (strcmp (szMountedFilename[nCurrentDrive], szFileToDelete) != 0)
+            //            {
+            //                // see if the file can be opened exclusively in r/w mode, if
+            //                // it can - we can delete it, otherwise we fail attempting to
+            //                // delete it so do not attempt
+
+            //                FILE *x = fopen (szFileToDelete, "r+b");
+            //                if (x != NULL)
+            //                {
+            //                    // we were able to open it - close it and delete it
+
+            //                    fclose (x);
+            //                    nStatus = unlink (szFileToDelete);
+            //                }
+            //                else
+            //                    *twWindows << "\n" << "attempted to delete open image" << "\n";
+            //            }
+            //            else
+            //                *twWindows << "\n" << "attempted to delete mounted image" << "\n";
+
+
+            //            if (nStatus == 0)
+            //            {
+            //                *twWindows << "image deleted" << "\n";
+            //                rsPort->Write (0x06);
+            //            }
+            //            else
+            //            {
+            //                *twWindows << "unable to delete image" << "\n";
+            //                rsPort->Write (0x15);
+            //            }
+            //        }
+            //        else
+            //        {
+            //            *twWindows << "\n" << "attempted to delete with image name > 128 characters" << "\n";
+            //            rsPort->Write (0x15);
+            //        }
+
+            //        SetState  (CONNECTED);
+            //    }
+        }
 
         public byte MountImageFile(string fileName, int nDrive)
         {
@@ -529,7 +808,7 @@ namespace FLEXNetSharp
                             imageFile[nDrive].stream.Read(imageFile[nDrive].driveInfo.cNumberOfSectorsPerTrack, 0, 1);
                             imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack = Convert.ToInt16(imageFile[nDrive].driveInfo.cNumberOfSectorsPerTrack[0]);
                             imageFile[nDrive].driveInfo.NumberOfBytesPerTrack = imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack * 256;
-                            imageFile[nDrive].driveInfo.NumberOfBytesPerTrack = (long)(imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack * 256L);
+                            imageFile[nDrive].driveInfo.NumberOfBytesPerTrack = imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack * 256L;
                             imageFile[nDrive].driveInfo.LogicalSectorSize = 0; //set sector size = 256 bytes for FLEX.
                             break;
 
@@ -545,8 +824,8 @@ namespace FLEXNetSharp
                                 int nClusterSize = stIDSector.cBIT[1] + (stIDSector.cBIT[0] * 256);
                                 int nLogicalSectorSize = stIDSector.cLSS[1] + (stIDSector.cLSS[0] * 256);
 
-                                long nDiskSize = (long)(nTotalSectors * 256);
-                                nDiskSize += (long)((nSectorsPerTrack - nSectorsPerTrackZero) * 256);
+                                long nDiskSize = nTotalSectors * 256;
+                                nDiskSize += (nSectorsPerTrack - nSectorsPerTrackZero) * 256;
 
                                 imageFile[nDrive].driveInfo.NumberOfSectorsPerTrack = nSectorsPerTrack;
                                 imageFile[nDrive].driveInfo.TotalNumberOfSectorOnMedia = nTotalSectors;
@@ -579,7 +858,6 @@ namespace FLEXNetSharp
                     }
                 }
 
-                Message = Message.Replace("/", @"\");
                 Console.WriteLine(Message);
             }
             catch (Exception e)
@@ -617,9 +895,9 @@ namespace FLEXNetSharp
                             lOffsetToStartOfTrack = (imageFile[currentDrive].track * imageFile[currentDrive].driveInfo.NumberOfBytesPerTrack);
 
                             if (imageFile[currentDrive].sector == 0)
-                                lOffsetFromTrackStartToSector = (long)imageFile[currentDrive].sector * 256L;
+                                lOffsetFromTrackStartToSector = imageFile[currentDrive].sector * 256L;
                             else
-                                lOffsetFromTrackStartToSector = (long)(imageFile[currentDrive].sector - 1) * 256L;
+                                lOffsetFromTrackStartToSector = (imageFile[currentDrive].sector - 1) * 256L;
 
                             lSectorOffset = lOffsetToStartOfTrack + lOffsetFromTrackStartToSector;
 
@@ -642,12 +920,12 @@ namespace FLEXNetSharp
 
                                 // now we can access the diskette iamge with T/S calcualted from LBN
 
-                                lOffsetToStartOfTrack = ((long)_track * imageFile[currentDrive].driveInfo.NumberOfBytesPerTrack);
+                                lOffsetToStartOfTrack = (_track * imageFile[currentDrive].driveInfo.NumberOfBytesPerTrack);
 
                                 if (imageFile[currentDrive].sector == 0)
-                                    lOffsetFromTrackStartToSector = (long)_sector * 256L;
+                                    lOffsetFromTrackStartToSector = _sector * 256L;
                                 else
-                                    lOffsetFromTrackStartToSector = (long)(_sector - 1) * 256L;
+                                    lOffsetFromTrackStartToSector = (_sector - 1) * 256L;
 
                                 lSectorOffset = lOffsetToStartOfTrack + lOffsetFromTrackStartToSector;
                             }
@@ -684,7 +962,7 @@ namespace FLEXNetSharp
                 }
 
                 lSectorOffset = ((imageFile[currentDrive].driveInfo.LogicalSectorSize + 1) * 256) * (imageFile[currentDrive].track * 256 + imageFile[currentDrive].sector);
-                Console.Write("[" + lSectorOffset.ToString("X8") + "]");
+                Console.Write("[{0:X8}]", lSectorOffset);
             }
 
             return (lSectorOffset);
@@ -788,7 +1066,12 @@ namespace FLEXNetSharp
         {
             byte cStatus = 0x15;
 
-            string fullFilename = createPath + "/" + createFilename + ".DSK";
+            if (string.IsNullOrWhiteSpace(createPath))
+            {
+                createPath = currentWorkingDirectory;
+            }
+
+            string fullFilename = Path.Combine(createPath, createFilename) + ".DSK";
 
             int track;
             int sector;
@@ -829,13 +1112,13 @@ namespace FLEXNetSharp
                                             {
                                                 if (track == (numberOfTracks - 1))
                                                 {
-                                                    sectorBuffer[0] = (byte)0x00;
-                                                    sectorBuffer[1] = (byte)0x00;
+                                                    sectorBuffer[0] = 0x00;
+                                                    sectorBuffer[1] = 0x00;
                                                 }
                                                 else
                                                 {
                                                     sectorBuffer[0] = (byte)(track + 1);
-                                                    sectorBuffer[1] = (byte)1;
+                                                    sectorBuffer[1] = 1;
                                                 }
                                             }
                                             else
@@ -854,16 +1137,16 @@ namespace FLEXNetSharp
                                                     break;
                                                 case 2:
 
-                                                    char[] cArray = createFilename.ToCharArray();
-                                                    for (int i = 0; i < cArray.Length && i < 11; i++)
+                                                    var volumeLabel = createFilename.PadRight(RAW_SIR.sizeofVolumeLabel);
+                                                    for (int i = 0; i < volumeLabel.Length && i < 11; i++)
                                                     {
-                                                        sectorBuffer[16 + i] = (byte)cArray[i];
+                                                        sectorBuffer[16 + i] = (byte)volumeLabel[i];
                                                     }
 
                                                     sectorBuffer[27] = (byte)(volumeNumber / 256);
                                                     sectorBuffer[28] = (byte)(volumeNumber % 256);
-                                                    sectorBuffer[29] = (byte)0x01;                  // first user track
-                                                    sectorBuffer[30] = (byte)0x01;                  // first user sector
+                                                    sectorBuffer[29] = 0x01;                  // first user track
+                                                    sectorBuffer[30] = 0x01;                  // first user sector
                                                     sectorBuffer[31] = (byte)(numberOfTracks - 1);  // last user track
                                                     sectorBuffer[32] = (byte)numberOfSectors;       // last user sector
                                                     sectorBuffer[33] = (byte)(nTotalSectors / 256);
@@ -886,8 +1169,8 @@ namespace FLEXNetSharp
                                                 default:
                                                     if (sector == (numberOfSectors - 1))
                                                     {
-                                                        sectorBuffer[0] = (byte)0x00;
-                                                        sectorBuffer[1] = (byte)0x00;
+                                                        sectorBuffer[0] = 0x00;
+                                                        sectorBuffer[1] = 0x00;
                                                     }
                                                     else
                                                     {
@@ -921,6 +1204,262 @@ namespace FLEXNetSharp
                 cStatus = 0x15;     // too many tracks
 
             return (cStatus);
+        }
+
+        public void StateConnectionStateConnected(int c)
+        {
+            if (c == 'U')
+            {
+                SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
+                Console.Write(string.Format("{0} ", c.ToString("X2")));
+                SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
+
+                State = CONNECTION_STATE.SYNCRONIZING;
+                WriteByte(0x55);
+            }
+            else if (c == '?')
+            {
+                // Query Current Directory
+
+                SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
+                Console.Write(currentWorkingDirectory);
+                SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
+                Console.Write("\n");
+
+                sp.Write(currentWorkingDirectory);
+                WriteByte(0x0D, false);
+                WriteByte(0x06);
+            }
+            else if (c == 'S')      // used by FLEX to read a sector from the PC
+            {
+                // 'S'end Sector Request
+
+                if (imageFile[currentDrive] == null)
+                    imageFile[currentDrive] = new ImageFile();
+
+                imageFile[currentDrive].trackAndSectorAreTrackAndSector = true;
+                imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.S_MODE;
+                State = CONNECTION_STATE.GET_TRACK;
+            }
+            else if (c == 'R')      // used by FLEX to write a sector to the PC
+            {
+                // 'R'eceive Sector Request
+
+                if (imageFile[currentDrive] == null)
+                    imageFile[currentDrive] = new ImageFile();
+
+                imageFile[currentDrive].trackAndSectorAreTrackAndSector = true;
+                imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.R_MODE;
+                State = CONNECTION_STATE.GET_TRACK;
+            }
+            else if (c == 'E')
+            {
+                // Exit
+
+                State = CONNECTION_STATE.NOT_CONNECTED;
+                WriteByte(0x06);
+                //if (shutDown == "T")
+                //    done = true;
+            }
+            else if (c == 'Q')          // Quick Check for active connection
+            {
+                WriteByte(0x06);
+            }
+            else if (c == 'M')          // Mount drive image
+            {
+                commandFilename = "";
+                State = CONNECTION_STATE.MOUNT_GETFILENAME;
+            }
+            else if (c == 'D')
+            {
+                // Delete file command
+
+                commandFilename = "";
+                State = CONNECTION_STATE.DELETE_GETFILENAME;
+            }
+            else if (c == 'A')
+            {
+                // Dir file command
+
+                commandFilename = "";
+                State = CONNECTION_STATE.DIR_GETFILENAME;
+            }
+            else if (c == 'I')
+            {
+                // List Directories file command
+
+                dirFilename = "dirtxt" + port.ToString() + currentDrive.ToString() + ".txt";
+
+                if (streamDir != null)
+                {
+                    streamDir.Dispose();
+                    streamDir = null;
+                    File.Delete(dirFilename);
+                }
+
+                using (var fileStream = File.Open(dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+                using (var stringWriter = new StreamWriter(fileStream, Encoding.ASCII))
+                {
+                    // Get the drive and volume information
+                    System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(currentWorkingDirectory));
+                    long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                    string driveName = driveInfo.Name;
+                    string volumeLabel = driveInfo.VolumeLabel;
+
+                    var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
+                    stringWriter.Write(topLine);
+                    Console.WriteLine(topLine);
+
+                    stringWriter.Write(currentWorkingDirectory + "\r\n\r\n");
+                    Console.WriteLine(currentWorkingDirectory);
+
+                    // get the list of directories in the current working directory
+                    string[] files = Directory.GetDirectories(currentWorkingDirectory);
+
+                    int maxFilenameSize = 0;
+                    foreach (string file in files)
+                    {
+                        if (file.Length > maxFilenameSize)
+                            maxFilenameSize = file.Length;
+                    }
+                    maxFilenameSize = maxFilenameSize - currentWorkingDirectory.Length;
+
+                    int fileCount = 0;
+                    foreach (string file in files)
+                    {
+                        FileInfo fi = new FileInfo(file);
+                        DateTime fCreation = fi.CreationTime;
+
+                        string fileInfoLine = string.Format("{0}    <DIR>   {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                        if (fileInfoLine.Length > 0)
+                        {
+                            fileCount += 1;
+                            stringWriter.Write(fileInfoLine);
+                        }
+                    }
+
+                    stringWriter.Write("\r\n");
+                    stringWriter.Write("    {0} files\r\n", fileCount);
+                    stringWriter.Write("    {0} bytes free\r\n", availableFreeSpace);
+                }
+
+
+                try
+                {
+                    streamDir = File.OpenText(dirFilename);
+                    WriteByte((byte)'\r', false);
+                    WriteByte((byte)'\n', false);
+                    State = CONNECTION_STATE.SENDING_DIR;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+
+                    File.Delete(dirFilename);
+
+                    WriteByte(0x06);
+                    State = CONNECTION_STATE.CONNECTED;
+                }
+            }
+            else if (c == 'P')
+            {
+                // Change Directory
+
+                commandFilename = "";
+                State = CONNECTION_STATE.CD_GETFILENAME;
+            }
+            else if (c == 'V')
+            {
+                // Change Drive (and optionally the directory)
+
+                commandFilename = "";
+                State = CONNECTION_STATE.DRIVE_GETFILENAME;
+            }
+            else if (c == 'C')
+            {
+                // Create a drive image
+
+                createFilename = "";
+                createPath = "";
+                createVolumeNumber = "";
+                createTrackCount = "";
+                createSectorCount = "";
+
+                State = CONNECTION_STATE.CREATE_GETPARAMETERS;
+                createState = CREATE_STATE.GET_CREATE_PATH;
+            }
+
+            // now the Extended multi drive versions - these are what makes FLEXNet different from NETPC.
+            //
+            //      NETPC only allowed one drive to be mounted at a time. FLEXnet allows all four FLEX
+            //      drives to be remote by providing mount points withinh FLEXNet for 4 image files per
+            //      serial port.
+
+            else if (c == 's')
+            {
+                // 's'end Sector Request with drive
+
+                State = CONNECTION_STATE.GET_READ_DRIVE;
+            }
+            else if (c == 'r')
+            {
+                // 'r'eceive Sector Request with drive
+
+                State = CONNECTION_STATE.GET_WRITE_DRIVE;
+            }
+            else if (c == ('s' | 0x80))     // used by OS9 to read a sector from the PC - track and sector are LBN
+            {
+                // 'S'end Sector Request
+
+                if (imageFile[currentDrive] == null)
+                    imageFile[currentDrive] = new ImageFile();
+                imageFile[currentDrive].trackAndSectorAreTrackAndSector = false;
+
+                State = CONNECTION_STATE.GET_READ_DRIVE;
+            }
+            else if (c == ('r' | 0x80))      // used by OS9 to write a sector to the PC- track and sector are LBN
+            {
+                // 'R'eceive Sector Request
+
+                if (imageFile[currentDrive] == null)
+                    imageFile[currentDrive] = new ImageFile();
+                imageFile[currentDrive].trackAndSectorAreTrackAndSector = false;
+
+                State = CONNECTION_STATE.GET_WRITE_DRIVE;
+            }
+            else if (c == 'm')      // Mount drive image with drive
+            {
+                commandFilename = "";
+                State = CONNECTION_STATE.GET_MOUNT_DRIVE;
+            }
+            else if (c == 'd')      // Report which disk image is mounted to requested drive
+            {
+                State = CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE;
+            }
+            else if (c == 'c')      // Create a drive image
+            {
+                createFilename = "";
+                createPath = "";
+                createVolumeNumber = "";
+                createTrackCount = "";
+                createSectorCount = "";
+
+                State = CONNECTION_STATE.GET_CREATE_DRIVE;
+                createState = CREATE_STATE.GET_CREATE_PATH;
+            }
+
+            else                    // Unknown - command - go back to (int)CONNECTION_STATE.CONNECTED
+            {
+                if (State != CONNECTION_STATE.CONNECTED)
+                    State = CONNECTION_STATE.CONNECTED;
+
+                if (c != 0x20)
+                {
+                    SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
+                    Console.Write("\n State is reset to CONNECTED - Unknown command recieved [{0:X2}]", c);
+                    SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
+                }
+            }
         }
     }
 }
