@@ -1,71 +1,133 @@
-﻿using System;
-using System.Globalization;
-
+﻿using FLEX_0S9_Net;
+using System;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
-using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace FLEXNetSharp
 {
-    public class Ports
+    internal class Ports
     {
-        public StreamReader streamDir = null;
-        public System.IO.Ports.SerialPort sp;
-        public string       port;
+        private const int MaxSectorSize = 1024;
+        private const int MaxImageFiles = 4;
+
+        private readonly ImageFile[] imageFile = new ImageFile[MaxImageFiles];
+        private readonly byte[] sectorBuffer = new byte[MaxSectorSize];        // allow for up to 1024 byte sectors
+
+        private StreamReader streamDir = null;
+        private SerialPort sp;
+        private string       port;
         private CONNECTION_STATE state;
-        public CREATE_STATE createState;
-        public int          rate;
-        public string       speed;
-        public string       verbose;
-        public string       autoMount;
-        public ImageFile[]  imageFile = new ImageFile[4];
-        public string       dirFilename;
-        public int          currentDrive = 0;
+        private CREATE_STATE createState;
+        private int          rate;
+        private bool       verbose;
+        private bool       autoMount;
+        private string       dirFilename;
+        private int          currentDrive = 0;
 
-        public int sectorIndex = 0;
-        public int calculatedCRC = 0;
+        private int sectorIndex = 0;
+        private int calculatedCRC = 0;
 
-        public int checksumIndex = 0;
-        public int checksum = 0;
+        private int checksumIndex = 0;
+        private int checksum = 0;
 
-        public byte[] sectorBuffer = new byte[1024];        // allow for up to 1024 byte sectors
 
-        public string currentWorkingDirectory;
-        public string commandFilename;
-        public string createFilename;
-        public string createPath;
-        public string createVolumeNumber;
-        public string createTrackCount;
-        public string createSectorCount;
-
-        public string defaultStartDirectory = "";
-
-        public bool g_displaySectorData;
-
-        CultureInfo ci = new CultureInfo("en-us");
-
+        private string currentWorkingDirectory;
+        private string commandFilename;
+        private string createFilename;
+        private string createPath;
+        private string createVolumeNumber;
+        private string createTrackCount;
+        private string createSectorCount;
+        private bool autoShutdown;
         private long m_lPartitionBias = -1;
-
-        public const int sizeofVolumeLabel = 11;
-        public const int sizeofDirEntry = 24;
-        public const int sizeofSystemInformationRecord = 24;
-
         private int m_nSectorBias;
 
-        public int SectorBias
+        public Ports(PortParameters parameters)
+        {
+            if (string.IsNullOrEmpty(parameters.Device))
+            {
+                port = $"COM{parameters.Num}";
+            }
+            else
+            {
+                port = parameters.Device;
+            }
+
+            rate = parameters.Rate;
+            autoShutdown = parameters.AutoShutdown;
+            verbose = parameters.Verbose;
+            autoMount = parameters.AutoMount;
+            currentWorkingDirectory = parameters.DefaultDirectory;
+
+            sp = new SerialPort(port, rate, Parity.None, 8, StopBits.One);
+            sp.ReadBufferSize = MaxSectorSize;
+            sp.WriteBufferSize = MaxSectorSize;
+            sp.DtrEnable = true;
+            sp.RtsEnable = true;
+
+            try
+            {
+                sp.Open();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+                try
+                {
+                    sp.Close();
+                    sp.Open();
+                }
+                catch (Exception e1)
+                {
+                    Console.WriteLine(e1.Message);
+                }
+            }
+
+            State = CONNECTION_STATE.NOT_CONNECTED;
+
+            for (int index = 0; index != MaxImageFiles; ++index)
+            {
+                imageFile[index] = new ImageFile();
+                if (parameters.ImageFiles.Length > index)
+                {
+                    if (!string.IsNullOrEmpty(parameters.ImageFiles[index]))
+                    {
+                        MountImageFile(parameters.ImageFiles[index], index);
+                    }
+                }
+            }
+        }
+
+        public void DisplayConfiguration()
+        {
+            Console.WriteLine("Port:{0}", port);
+            Console.WriteLine("Parameters:");
+            Console.WriteLine("    Rate:              {0}", rate);
+            Console.WriteLine("    Verbose:           {0}", verbose);
+            Console.WriteLine("    AutoMount:         {0}", autoMount);
+            Console.WriteLine("    DefaultDirectory   {0}", currentWorkingDirectory);
+            Console.WriteLine("    ImageFiles");
+            int count = 0;
+            foreach (var file in imageFile)
+            {
+                Console.WriteLine("        {0} - {1}", count++, file.Name);
+            }
+        }
+
+        private int SectorBias
         {
             get { return m_nSectorBias; }
             set { m_nSectorBias = value; }
         }
 
-        public int ConvertMSBToInt16(byte[] value)
+        private int ConvertMSBToInt16(byte[] value)
         {
             return (value[0] * 256) + value[1];
         }
 
-        public int ConvertMSBToInt24(byte[] value)
+        private int ConvertMSBToInt24(byte[] value)
         {
             return (value[0] * 256 * 256) + (value[1] * 256) + value[2];
         }
@@ -75,7 +137,7 @@ namespace FLEXNetSharp
         /// </summary>
         /// <param name="fs"></param>
         /// <returns></returns>
-        public FileFormat GetFileFormat(Stream fs)
+        private FileFormat GetFileFormat(Stream fs)
         {
             FileFormat ff = FileFormat.fileformat_UNKNOWN;
 
@@ -149,7 +211,7 @@ namespace FLEXNetSharp
         }
 
         private readonly byte[] serialBuffer = new byte[8];
-        public void WriteByte(byte byteToWrite, bool displayOnScreen = true)
+        private void WriteByte(byte byteToWrite, bool displayOnScreen = true)
         {
             serialBuffer[0] = byteToWrite;
             sp.Write(serialBuffer, 0, 1);
@@ -157,12 +219,12 @@ namespace FLEXNetSharp
             if (displayOnScreen)
             {
                 SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
-                Console.Write(byteToWrite.ToString("X2", ci) + " ");
+                Console.Write("{0:X2} ", byteToWrite);
                 SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
             }
         }
 
-        public void SetAttribute(int attr)
+        private void SetAttribute(int attr)
         {
             if (attr == (int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE)
             {
@@ -176,7 +238,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public CONNECTION_STATE State
+        private CONNECTION_STATE State
         {
             get => state;
 
@@ -228,7 +290,7 @@ namespace FLEXNetSharp
         }
 
 
-        public void StateConnectionStateNotConnected(int c)
+        private void StateConnectionStateNotConnected(int c)
         {
             if (c == 0x55)
             {
@@ -239,7 +301,7 @@ namespace FLEXNetSharp
 
         // send ack to sync
 
-        public void StateConnectionStateSynchronizing(int c)
+        private void StateConnectionStateSynchronizing(int c)
         {
             if (c != 0x55)
             {
@@ -255,7 +317,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateDirGetFilename(int c)
+        private void StateConnectionStateDirGetFilename(int c)
         {
             if (c != 0x0d)
                 commandFilename += (char)c;
@@ -332,7 +394,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateSendingDir(int c)
+        private void StateConnectionStateSendingDir(int c)
         {
             if (c == ' ')
             {
@@ -367,15 +429,13 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateGetRequestedMountDrive(int c)
+        private void StateConnectionStateGetRequestedMountDrive(int c)
         {
             // Report which disk image is mounted to requested drive
             currentDrive = c;
 
             SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
-            Console.Write(currentWorkingDirectory);
-            Console.Write("\r");
-            Console.Write("\n");
+            Console.WriteLine(currentWorkingDirectory);
             SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
 
             if (imageFile[currentDrive] == null)
@@ -394,7 +454,7 @@ namespace FLEXNetSharp
             State = CONNECTION_STATE.CONNECTED;
         }
 
-        public void StateConnectionStateGetReadDrive(int c)
+        private void StateConnectionStateGetReadDrive(int c)
         {
             currentDrive = c;
 
@@ -404,7 +464,7 @@ namespace FLEXNetSharp
             imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.S_MODE;
             State = CONNECTION_STATE.GET_TRACK;
         }
-        public void StateConnectionStateGetWriteDrive(int c)
+        private void StateConnectionStateGetWriteDrive(int c)
         {
             currentDrive = c;
 
@@ -415,19 +475,19 @@ namespace FLEXNetSharp
             State = CONNECTION_STATE.GET_TRACK;
         }
 
-        public void StateConnectionStateGetMountDrive(int c)
+        private void StateConnectionStateGetMountDrive(int c)
         {
             currentDrive = c;
             State = CONNECTION_STATE.MOUNT_GETFILENAME;
         }
 
-        public void StateConnectionStateGetTrack(int c)
+        private void StateConnectionStateGetTrack(int c)
         {
             imageFile[currentDrive].track = c;
             State = CONNECTION_STATE.GET_SECTOR;
         }
 
-        public void StateConnectionStateGetSector(int c)
+        private void StateConnectionStateGetSector(int c)
         {
             imageFile[currentDrive].sector = c;
 
@@ -448,13 +508,13 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateGetCreateDrive(int c)
+        private void StateConnectionStateGetCreateDrive(int c)
         {
             currentDrive = c;
             State = CONNECTION_STATE.CREATE_GETPARAMETERS;
         }
 
-        public void StateConnectionStateRecievingSector(int c)
+        private void StateConnectionStateRecievingSector(int c)
         {
             sectorBuffer[sectorIndex++] = (byte)c;
             calculatedCRC += c;
@@ -466,7 +526,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateCDGetFilename(int c)
+        private void StateConnectionStateCDGetFilename(int c)
         {
             if (c != 0x0d)
                 commandFilename += (char)c;
@@ -492,7 +552,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateGetCRC(int c)
+        private void StateConnectionStateGetCRC(int c)
         {
             if (checksumIndex++ == 0)
                 checksum = c * 256;
@@ -506,7 +566,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateWaitACK(int c)
+        private void StateConnectionStateWaitACK(int c)
         {
             if (c == 0x06)
             {
@@ -518,7 +578,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateMountGetFilename(int c)
+        private void StateConnectionStateMountGetFilename(int c)
         {
             if (imageFile[currentDrive] == null)
                 imageFile[currentDrive] = new ImageFile();
@@ -566,7 +626,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateDriveGetFilename(int c)
+        private void StateConnectionStateDriveGetFilename(int c)
         {
             if (c != 0x0d)
             {
@@ -598,7 +658,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public void StateConnectionStateCreateGetParameters(int c)
+        private void StateConnectionStateCreateGetParameters(int c)
         {
             if (c != 0x0d)
             {
@@ -636,7 +696,7 @@ namespace FLEXNetSharp
                     string fullFilename = createPath + "/" + createFilename + ".DSK";
 
                     byte status;
-                    Console.Write("\n" + "Creating Image File " + fullFilename);
+                    Console.Write("\nCreating Image File {0}", fullFilename);
                     status = CreateImageFile();
                     WriteByte(status);
 
@@ -676,7 +736,7 @@ namespace FLEXNetSharp
                 }
             }
         }
-        public void StateConnectionStateDeleteGetFilename(int c)
+        private void StateConnectionStateDeleteGetFilename(int c)
         {
             //    if (c != 0x0d)
             //        commandFilename[nCommandFilenameIndex++] = c;
@@ -740,7 +800,7 @@ namespace FLEXNetSharp
             //    }
         }
 
-        public byte MountImageFile(string fileName, int nDrive)
+        private byte MountImageFile(string fileName, int nDrive)
         {
             byte c = 0x06;
             try
@@ -748,13 +808,17 @@ namespace FLEXNetSharp
                 Directory.SetCurrentDirectory(currentWorkingDirectory);
 
                 string fileToLoad = fileName;
+                if (string.IsNullOrEmpty(Path.GetExtension(fileName)))
+                {
+                    fileToLoad += ".DSK";
+                }
 
                 try
                 {
                     if (imageFile[nDrive] == null)
                         imageFile[nDrive] = new ImageFile();
 
-                    imageFile[nDrive].stream = File.Open(fileName, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+                    imageFile[nDrive].stream = File.Open(fileToLoad, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
                     imageFile[nDrive].fileFormat = GetFileFormat(imageFile[nDrive].stream);
                     imageFile[nDrive].readOnly = false;
                 }
@@ -763,11 +827,11 @@ namespace FLEXNetSharp
                     // Unable to open file for read/write try readonly
                     try
                     {
-                        imageFile[nDrive].stream = File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read);
+                        imageFile[nDrive].stream = File.Open(fileToLoad, FileMode.Open, FileAccess.Read, FileShare.Read);
                         imageFile[nDrive].fileFormat = GetFileFormat(imageFile[nDrive].stream);
                         imageFile[nDrive].readOnly = true;
 
-                        Console.WriteLine("Mounting {0} readonly", fileName);
+                        Console.WriteLine("Mounting {0} readonly", fileToLoad);
                     }
                     catch (Exception eIn)
                     {
@@ -845,6 +909,7 @@ namespace FLEXNetSharp
                         imageFile[nDrive].driveInfo.MountedFilename = Path.Combine(currentWorkingDirectory, fileToLoad);
 
                     imageFile[nDrive].driveInfo.MountedFilename = imageFile[nDrive].driveInfo.MountedFilename.ToUpper();
+                    imageFile[nDrive].Name = fileToLoad;
                 }
                 else
                 {
@@ -862,13 +927,13 @@ namespace FLEXNetSharp
             }
             catch (Exception e)
             {
-                Console.WriteLine(string.Format("Unable to open directory: {0} due to exception {1} - please change your configuration file", currentWorkingDirectory, e));
+                Console.WriteLine("Unable to open directory: {0} due to exception {1} - please change your configuration file", currentWorkingDirectory, e);
             }
 
             return (c);
         }
 
-        public long GetSectorOffset()
+        private long GetSectorOffset()
         {
             long lSectorOffset = 0;
             long lOffsetToStartOfTrack;
@@ -901,7 +966,7 @@ namespace FLEXNetSharp
 
                             lSectorOffset = lOffsetToStartOfTrack + lOffsetFromTrackStartToSector;
 
-                            Console.Write("[" + lSectorOffset.ToString("X8") + "]");
+                            Console.Write("[{0:X8}]", lSectorOffset.ToString("X8"));
                         }
                         break;
 
@@ -934,7 +999,7 @@ namespace FLEXNetSharp
                                 Console.WriteLine(e);
                                 string message = e.Message;
                             }
-                            Console.Write("[" + lSectorOffset.ToString("X8") + "]");
+                            Console.Write("[{0:X8}]", lSectorOffset);
                         }
                         break;
                 }
@@ -968,7 +1033,7 @@ namespace FLEXNetSharp
             return (lSectorOffset);
         }
 
-        public byte WriteSector()
+        private byte WriteSector()
         {
             byte status = 0x15;
 
@@ -999,25 +1064,7 @@ namespace FLEXNetSharp
             return (status);
         }
 
-
-        public void SendCharToFLEX(byte c, bool displayOnScreen)
-        {
-            WriteByte(c, displayOnScreen);
-        }
-
-        public void SendCharToFLEX(string str, bool displayOnScreen)
-        {
-            if (displayOnScreen)
-            {
-                SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
-                Console.Write(str);
-                SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
-            }
-
-            sp.Write(str);
-        }
-
-        public void SendSector()
+        private void SendSector()
         {
             int checksum = 0;
 
@@ -1032,7 +1079,7 @@ namespace FLEXNetSharp
 
                 for (int nIndex = 0; nIndex < bytesPerSector; nIndex++)
                 {
-                    if (Program.verboseOutput)
+                    if (verbose)
                     {
                         // cause new line after every 32 characters
                         if (nIndex % 32 == 0)
@@ -1041,8 +1088,7 @@ namespace FLEXNetSharp
                         }
                     }
 
-                    //WriteByte(sectorBuffer[nIndex], g_displaySectorData);
-                    WriteByte(sectorBuffer[nIndex], Program.verboseOutput);
+                    WriteByte(sectorBuffer[nIndex], verbose);
                     checksum += (char)(sectorBuffer[nIndex] & 0xFF);
                 }
 
@@ -1062,7 +1108,7 @@ namespace FLEXNetSharp
             }
         }
 
-        public byte CreateImageFile()
+        private byte CreateImageFile()
         {
             byte cStatus = 0x15;
 
@@ -1206,12 +1252,14 @@ namespace FLEXNetSharp
             return (cStatus);
         }
 
-        public void StateConnectionStateConnected(int c)
+        private bool StateConnectionStateConnected(int c)
         {
+            bool done = false;
+
             if (c == 'U')
             {
                 SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
-                Console.Write(string.Format("{0} ", c.ToString("X2")));
+                Console.Write("{0:X2} ", c);
                 SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
 
                 State = CONNECTION_STATE.SYNCRONIZING;
@@ -1255,11 +1303,13 @@ namespace FLEXNetSharp
             else if (c == 'E')
             {
                 // Exit
-
                 State = CONNECTION_STATE.NOT_CONNECTED;
                 WriteByte(0x06);
-                //if (shutDown == "T")
-                //    done = true;
+                if (autoShutdown)
+                {
+                    Console.WriteLine("Recieved exit from client shuting down");
+                    done = true;
+                }
             }
             else if (c == 'Q')          // Quick Check for active connection
             {
@@ -1458,6 +1508,126 @@ namespace FLEXNetSharp
                     SetAttribute((int)CONSOLE_ATTRIBUTE.REVERSE_ATTRIBUTE);
                     Console.Write("\n State is reset to CONNECTED - Unknown command recieved [{0:X2}]", c);
                     SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
+                }
+            }
+
+            return done;
+        }
+
+        public void ProcessRequests()
+        {
+            bool done = false;
+            while (!done)
+            {
+                try
+                {
+                    int c = sp.ReadByte();
+                    if (c == -1)
+                    {
+                        // The serial port has been closed so stop the loop and let the thread die.
+                        done = true;
+                        continue;
+                    }
+
+                    if ((State != CONNECTION_STATE.RECEIVING_SECTOR) &&
+                        (State != CONNECTION_STATE.GET_CRC))
+                    {
+                        Console.Write("{0:X2} ", c);
+                    }
+
+                    switch (State)
+                    {
+                        case CONNECTION_STATE.NOT_CONNECTED:
+                            StateConnectionStateNotConnected(c);
+                            break;
+
+                        case CONNECTION_STATE.SYNCRONIZING:
+                            StateConnectionStateSynchronizing(c);
+                            break;
+
+                        case CONNECTION_STATE.CONNECTED:
+                            done = StateConnectionStateConnected(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_REQUESTED_MOUNT_DRIVE:
+                            StateConnectionStateGetRequestedMountDrive(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_READ_DRIVE:
+                            StateConnectionStateGetReadDrive(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_WRITE_DRIVE:
+                            StateConnectionStateGetWriteDrive(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_MOUNT_DRIVE:
+                            StateConnectionStateGetMountDrive(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_CREATE_DRIVE:
+                            StateConnectionStateGetCreateDrive(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_TRACK:
+                            StateConnectionStateGetTrack(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_SECTOR:
+                            StateConnectionStateGetSector(c);
+                            break;
+
+                        case CONNECTION_STATE.RECEIVING_SECTOR:
+                            StateConnectionStateRecievingSector(c);
+                            break;
+
+                        case CONNECTION_STATE.GET_CRC:
+                            StateConnectionStateGetCRC(c);
+                            break;
+
+                        case CONNECTION_STATE.MOUNT_GETFILENAME:
+                            StateConnectionStateMountGetFilename(c);
+                            break;
+
+                        case CONNECTION_STATE.DELETE_GETFILENAME:
+                            StateConnectionStateDeleteGetFilename(c);
+                            break;
+
+                        case CONNECTION_STATE.DIR_GETFILENAME:
+                            StateConnectionStateDirGetFilename(c);
+                            break;
+
+                        case CONNECTION_STATE.CD_GETFILENAME:
+                            StateConnectionStateCDGetFilename(c);
+                            break;
+
+                        case CONNECTION_STATE.DRIVE_GETFILENAME:
+                            StateConnectionStateDriveGetFilename(c);
+                            break;
+
+                        case CONNECTION_STATE.SENDING_DIR:
+                            StateConnectionStateSendingDir(c);
+                            break;
+
+                        case CONNECTION_STATE.CREATE_GETPARAMETERS:
+                            StateConnectionStateCreateGetParameters(c);
+                            break;
+
+                        case CONNECTION_STATE.WAIT_ACK:
+                            StateConnectionStateWaitACK(c);
+                            break;
+
+                        default:
+                            State = CONNECTION_STATE.NOT_CONNECTED;
+                            //sprintf (szHexTemp, "%02X", c);
+                            //*StatusLine << '\n' << "State is reset to NOT_CONNECTED - Unknown STATE " << szHexTemp;
+                            break;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                    done = true;
                 }
             }
         }
