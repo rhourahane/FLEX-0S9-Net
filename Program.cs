@@ -47,6 +47,7 @@ namespace FLEXNetSharp
         {
             foreach (Ports serialPort in listPorts)
             {
+                serialPort.Open();
                 var thread = new Thread(() => { serialPort.ProcessRequests(); });
                 thread.Start();
             }

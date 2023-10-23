@@ -18,7 +18,7 @@ namespace FLEXNetSharp
         private StreamReader streamDir = null;
         private SerialPort sp;
         private string       port;
-        private CONNECTION_STATE state;
+        private CONNECTION_STATE state = CONNECTION_STATE.NOT_CONNECTED;
         private CREATE_STATE createState;
         private int          rate;
         private bool       verbose;
@@ -61,6 +61,37 @@ namespace FLEXNetSharp
             autoMount = parameters.AutoMount;
             currentWorkingDirectory = parameters.DefaultDirectory;
 
+            for (int index = 0; index != MaxImageFiles; ++index)
+            {
+                imageFile[index] = new ImageFile();
+                if (parameters.ImageFiles.Length > index)
+                {
+                    if (!string.IsNullOrEmpty(parameters.ImageFiles[index]))
+                    {
+                        imageFile[index].Name = parameters.ImageFiles[index];
+                    }
+                }
+            }
+        }
+
+        public void DisplayConfiguration()
+        {
+            Console.WriteLine("Port:{0}", port);
+            Console.WriteLine("Parameters:");
+            Console.WriteLine("    Rate:              {0}", rate);
+            Console.WriteLine("    Verbose:           {0}", verbose);
+            Console.WriteLine("    AutoMount:         {0}", autoMount);
+            Console.WriteLine("    DefaultDirectory   {0}", currentWorkingDirectory);
+            Console.WriteLine("    ImageFiles");
+            int count = 0;
+            foreach (var file in imageFile)
+            {
+                Console.WriteLine("        {0} - {1}", count++, file.Name);
+            }
+        }
+
+        public void Open()
+        {
             sp = new SerialPort(port, rate, Parity.None, 8, StopBits.One);
             sp.ReadBufferSize = MaxSectorSize;
             sp.WriteBufferSize = MaxSectorSize;
@@ -87,32 +118,14 @@ namespace FLEXNetSharp
 
             State = CONNECTION_STATE.NOT_CONNECTED;
 
-            for (int index = 0; index != MaxImageFiles; ++index)
+            int index = 0;
+            foreach (var image in imageFile)
             {
-                imageFile[index] = new ImageFile();
-                if (parameters.ImageFiles.Length > index)
+                if (!string.IsNullOrEmpty(image.Name))
                 {
-                    if (!string.IsNullOrEmpty(parameters.ImageFiles[index]))
-                    {
-                        MountImageFile(parameters.ImageFiles[index], index);
-                    }
+                    MountImageFile(image.Name, index);
                 }
-            }
-        }
-
-        public void DisplayConfiguration()
-        {
-            Console.WriteLine("Port:{0}", port);
-            Console.WriteLine("Parameters:");
-            Console.WriteLine("    Rate:              {0}", rate);
-            Console.WriteLine("    Verbose:           {0}", verbose);
-            Console.WriteLine("    AutoMount:         {0}", autoMount);
-            Console.WriteLine("    DefaultDirectory   {0}", currentWorkingDirectory);
-            Console.WriteLine("    ImageFiles");
-            int count = 0;
-            foreach (var file in imageFile)
-            {
-                Console.WriteLine("        {0} - {1}", count++, file.Name);
+                ++index;
             }
         }
 
@@ -438,11 +451,6 @@ namespace FLEXNetSharp
             Console.WriteLine(currentWorkingDirectory);
             SetAttribute((int)CONSOLE_ATTRIBUTE.NORMAL_ATTRIBUTE);
 
-            if (imageFile[currentDrive] == null)
-            {
-                imageFile[currentDrive] = new ImageFile();
-            }
-
             if (imageFile[currentDrive].driveInfo.MountedFilename != null)
             {
                 sp.Write(imageFile[currentDrive].driveInfo.MountedFilename);
@@ -468,9 +476,6 @@ namespace FLEXNetSharp
         {
             currentDrive = c;
 
-            if (imageFile[currentDrive] == null)
-                imageFile[currentDrive] = new ImageFile();
-
             imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.R_MODE;
             State = CONNECTION_STATE.GET_TRACK;
         }
@@ -490,9 +495,6 @@ namespace FLEXNetSharp
         private void StateConnectionStateGetSector(int c)
         {
             imageFile[currentDrive].sector = c;
-
-            if (imageFile[currentDrive] == null)
-                imageFile[currentDrive] = new ImageFile();
 
             if (imageFile[currentDrive].driveInfo.mode == SECTOR_ACCESS_MODE.S_MODE)
             {
@@ -580,9 +582,6 @@ namespace FLEXNetSharp
 
         private void StateConnectionStateMountGetFilename(int c)
         {
-            if (imageFile[currentDrive] == null)
-                imageFile[currentDrive] = new ImageFile();
-
             if (c != 0x0d)
             {
                 // just add the character to the filename
@@ -815,9 +814,6 @@ namespace FLEXNetSharp
 
                 try
                 {
-                    if (imageFile[nDrive] == null)
-                        imageFile[nDrive] = new ImageFile();
-
                     imageFile[nDrive].stream = File.Open(fileToLoad, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
                     imageFile[nDrive].fileFormat = GetFileFormat(imageFile[nDrive].stream);
                     imageFile[nDrive].readOnly = false;
@@ -1252,6 +1248,82 @@ namespace FLEXNetSharp
             return (cStatus);
         }
 
+        private void ListDirectorys()
+        {
+            dirFilename = Path.GetTempFileName();
+
+            if (streamDir != null)
+            {
+                streamDir.Dispose();
+                streamDir = null;
+                File.Delete(dirFilename);
+            }
+
+            using (var fileStream = File.Open(dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
+            using (var stringWriter = new StreamWriter(fileStream, Encoding.ASCII))
+            {
+                // Get the drive and volume information
+                System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(currentWorkingDirectory));
+                long availableFreeSpace = driveInfo.AvailableFreeSpace;
+                string driveName = driveInfo.Name;
+                string volumeLabel = driveInfo.VolumeLabel;
+
+                var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
+                stringWriter.Write(topLine);
+                Console.WriteLine(topLine);
+
+                stringWriter.Write(currentWorkingDirectory + "\r\n\r\n");
+                Console.WriteLine(currentWorkingDirectory);
+
+                // get the list of directories in the current working directory
+                string[] files = Directory.GetDirectories(currentWorkingDirectory);
+
+                int maxFilenameSize = 0;
+                foreach (string file in files)
+                {
+                    if (file.Length > maxFilenameSize)
+                        maxFilenameSize = file.Length;
+                }
+                maxFilenameSize = maxFilenameSize - currentWorkingDirectory.Length;
+
+                int fileCount = 0;
+                foreach (string file in files)
+                {
+                    FileInfo fi = new FileInfo(file);
+                    DateTime fCreation = fi.CreationTime;
+
+                    string fileInfoLine = string.Format("{0}    <DIR>   {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
+                    if (fileInfoLine.Length > 0)
+                    {
+                        fileCount += 1;
+                        stringWriter.Write(fileInfoLine);
+                    }
+                }
+
+                stringWriter.Write("\r\n");
+                stringWriter.Write("    {0} files\r\n", fileCount);
+                stringWriter.Write("    {0} bytes free\r\n", availableFreeSpace);
+            }
+
+
+            try
+            {
+                streamDir = File.OpenText(dirFilename);
+                WriteByte((byte)'\r', false);
+                WriteByte((byte)'\n', false);
+                State = CONNECTION_STATE.SENDING_DIR;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e);
+
+                File.Delete(dirFilename);
+
+                WriteByte(0x06);
+                State = CONNECTION_STATE.CONNECTED;
+            }
+        }
+
         private bool StateConnectionStateConnected(int c)
         {
             bool done = false;
@@ -1281,10 +1353,6 @@ namespace FLEXNetSharp
             else if (c == 'S')      // used by FLEX to read a sector from the PC
             {
                 // 'S'end Sector Request
-
-                if (imageFile[currentDrive] == null)
-                    imageFile[currentDrive] = new ImageFile();
-
                 imageFile[currentDrive].trackAndSectorAreTrackAndSector = true;
                 imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.S_MODE;
                 State = CONNECTION_STATE.GET_TRACK;
@@ -1292,10 +1360,6 @@ namespace FLEXNetSharp
             else if (c == 'R')      // used by FLEX to write a sector to the PC
             {
                 // 'R'eceive Sector Request
-
-                if (imageFile[currentDrive] == null)
-                    imageFile[currentDrive] = new ImageFile();
-
                 imageFile[currentDrive].trackAndSectorAreTrackAndSector = true;
                 imageFile[currentDrive].driveInfo.mode = SECTOR_ACCESS_MODE.R_MODE;
                 State = CONNECTION_STATE.GET_TRACK;
@@ -1336,80 +1400,7 @@ namespace FLEXNetSharp
             }
             else if (c == 'I')
             {
-                // List Directories file command
-
-                dirFilename = "dirtxt" + port.ToString() + currentDrive.ToString() + ".txt";
-
-                if (streamDir != null)
-                {
-                    streamDir.Dispose();
-                    streamDir = null;
-                    File.Delete(dirFilename);
-                }
-
-                using (var fileStream = File.Open(dirFilename, FileMode.Create, FileAccess.Write, FileShare.ReadWrite))
-                using (var stringWriter = new StreamWriter(fileStream, Encoding.ASCII))
-                {
-                    // Get the drive and volume information
-                    System.IO.DriveInfo driveInfo = new System.IO.DriveInfo(Directory.GetDirectoryRoot(currentWorkingDirectory));
-                    long availableFreeSpace = driveInfo.AvailableFreeSpace;
-                    string driveName = driveInfo.Name;
-                    string volumeLabel = driveInfo.VolumeLabel;
-
-                    var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
-                    stringWriter.Write(topLine);
-                    Console.WriteLine(topLine);
-
-                    stringWriter.Write(currentWorkingDirectory + "\r\n\r\n");
-                    Console.WriteLine(currentWorkingDirectory);
-
-                    // get the list of directories in the current working directory
-                    string[] files = Directory.GetDirectories(currentWorkingDirectory);
-
-                    int maxFilenameSize = 0;
-                    foreach (string file in files)
-                    {
-                        if (file.Length > maxFilenameSize)
-                            maxFilenameSize = file.Length;
-                    }
-                    maxFilenameSize = maxFilenameSize - currentWorkingDirectory.Length;
-
-                    int fileCount = 0;
-                    foreach (string file in files)
-                    {
-                        FileInfo fi = new FileInfo(file);
-                        DateTime fCreation = fi.CreationTime;
-
-                        string fileInfoLine = string.Format("{0}    <DIR>   {1:MM/dd/yyyy HH:mm:ss}\r\n", Path.GetFileName(file).PadRight(maxFilenameSize), fCreation);
-                        if (fileInfoLine.Length > 0)
-                        {
-                            fileCount += 1;
-                            stringWriter.Write(fileInfoLine);
-                        }
-                    }
-
-                    stringWriter.Write("\r\n");
-                    stringWriter.Write("    {0} files\r\n", fileCount);
-                    stringWriter.Write("    {0} bytes free\r\n", availableFreeSpace);
-                }
-
-
-                try
-                {
-                    streamDir = File.OpenText(dirFilename);
-                    WriteByte((byte)'\r', false);
-                    WriteByte((byte)'\n', false);
-                    State = CONNECTION_STATE.SENDING_DIR;
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine(e);
-
-                    File.Delete(dirFilename);
-
-                    WriteByte(0x06);
-                    State = CONNECTION_STATE.CONNECTED;
-                }
+                ListDirectorys();
             }
             else if (c == 'P')
             {
@@ -1460,9 +1451,6 @@ namespace FLEXNetSharp
             else if (c == ('s' | 0x80))     // used by OS9 to read a sector from the PC - track and sector are LBN
             {
                 // 'S'end Sector Request
-
-                if (imageFile[currentDrive] == null)
-                    imageFile[currentDrive] = new ImageFile();
                 imageFile[currentDrive].trackAndSectorAreTrackAndSector = false;
 
                 State = CONNECTION_STATE.GET_READ_DRIVE;
@@ -1470,9 +1458,6 @@ namespace FLEXNetSharp
             else if (c == ('r' | 0x80))      // used by OS9 to write a sector to the PC- track and sector are LBN
             {
                 // 'R'eceive Sector Request
-
-                if (imageFile[currentDrive] == null)
-                    imageFile[currentDrive] = new ImageFile();
                 imageFile[currentDrive].trackAndSectorAreTrackAndSector = false;
 
                 State = CONNECTION_STATE.GET_WRITE_DRIVE;
@@ -1497,7 +1482,6 @@ namespace FLEXNetSharp
                 State = CONNECTION_STATE.GET_CREATE_DRIVE;
                 createState = CREATE_STATE.GET_CREATE_PATH;
             }
-
             else                    // Unknown - command - go back to (int)CONNECTION_STATE.CONNECTED
             {
                 if (State != CONNECTION_STATE.CONNECTED)
