@@ -1,11 +1,11 @@
-﻿namespace FLEXNetSharp
+﻿using FLEX_0S9_Net;
+
+namespace FLEXNetSharp
 {
     public class DriveInfo
     {
-        public SECTOR_ACCESS_MODE mode;
+        public SectorAccessMode Mode;
         public string MountedFilename;
-        //public int      NumberOfTracks;
-        public byte[] cNumberOfSectorsPerTrack = new byte[1];
         public long NumberOfBytesPerTrack;
         public long NumberOfSectorsPerTrack;
         public int NumberOfSectorsPerCluster;

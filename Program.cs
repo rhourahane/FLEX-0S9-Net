@@ -1,8 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Xml;
+﻿using System.Collections.Generic;
 using System.IO;
-using System.IO.Ports;
 using System.Reflection;
 using System.Threading;
 using Microsoft.Extensions.Configuration;

@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using FLEX_0S9_Net;
+using System.IO;
 
 namespace FLEXNetSharp
 {

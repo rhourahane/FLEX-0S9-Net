@@ -1,8 +1,11 @@
-﻿public enum FileFormat
+﻿namespace FLEX_0S9_Net
 {
-    fileformat_UNKNOWN = -1,
-    fileformat_OS9,
-    fileformat_FLEX,
-    fileformat_UniFLEX,
-    fileformat_FLEX_IDE
+    public enum FileFormat
+    {
+        fileformat_UNKNOWN = -1,
+        fileformat_OS9,
+        fileformat_FLEX,
+        fileformat_UniFLEX,
+        fileformat_FLEX_IDE
+    }
 }
