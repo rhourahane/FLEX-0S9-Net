@@ -17,13 +17,13 @@ namespace FLEXNetSharp
 
         private StreamReader streamDir = null;
         private SerialPort sp;
-        private string       port;
+        private string port;
         private ConnectionState state = ConnectionState.NotConnected;
         private CreateState createState;
-        private int          rate;
-        private bool       verbose;
-        private bool       autoMount;
-        private int          currentDrive = 0;
+        private int rate;
+        private bool verbose;
+        private bool autoMount;
+        private int currentDrive = 0;
 
         private int sectorIndex = 0;
         private int calculatedCRC = 0;
@@ -31,9 +31,8 @@ namespace FLEXNetSharp
         private int checksumIndex = 0;
         private int checksum = 0;
 
-
         private string currentWorkingDirectory;
-        private string commandFilename;
+        private StringBuilder commandFilename;
         private string createFilename;
         private string createPath;
         private string createVolumeNumber;
@@ -329,16 +328,16 @@ namespace FLEXNetSharp
         private void StateConnectionStateDirGetFilename(int c)
         {
             if (c != 0x0d)
-                commandFilename += (char)c;
+                commandFilename.Append((char)c);
             else
             {
                 if (commandFilename.Length == 0)
                 {
-                    commandFilename = "*.DSK";
+                    commandFilename = new StringBuilder("*.DSK");
                 }
                 else
                 {
-                    commandFilename += ".DSK";
+                    commandFilename.Append(".DSK");
                 }
 
                 if (streamDir != null)
@@ -359,7 +358,7 @@ namespace FLEXNetSharp
                     stringStream.Write("\r\nVolume in Drive {0} is {1}\r\n", driveName, volumeLabel);
                     stringStream.Write("{0}\r\n\r\n", currentWorkingDirectory);
 
-                    string[] files = Directory.GetFiles(currentWorkingDirectory, "*.DSK", SearchOption.TopDirectoryOnly);
+                    string[] files = Directory.GetFiles(currentWorkingDirectory, commandFilename.ToString(), SearchOption.TopDirectoryOnly);
 
                     // first get the max filename size
                     int maxFilenameSize = files.Max(f => f.Length);
@@ -522,13 +521,13 @@ namespace FLEXNetSharp
         private void StateConnectionStateCDGetFilename(int c)
         {
             if (c != 0x0d)
-                commandFilename += (char)c;
+                commandFilename.Append((char)c);
             else
             {
                 byte status;
                 try
                 {
-                    Directory.SetCurrentDirectory(commandFilename);
+                    Directory.SetCurrentDirectory(commandFilename.ToString());
                     status = 0x06;
 
                     currentWorkingDirectory = Directory.GetCurrentDirectory();
@@ -576,11 +575,11 @@ namespace FLEXNetSharp
             if (c != 0x0d)
             {
                 // just add the character to the filename
-                commandFilename += (char)c;
+                commandFilename.Append((char)c);
             }
             else
             {
-                commandFilename += ".DSK";
+                commandFilename.Append(".DSK");
 
                 // this should close any file that is currently open for this port/drive
                 if (imageFile[currentDrive] != null)
@@ -598,7 +597,7 @@ namespace FLEXNetSharp
                 if (commandFilename.Length > 0)
                 {
                     Console.WriteLine();
-                    status = MountImageFile(commandFilename, currentDrive);
+                    status = MountImageFile(commandFilename.ToString(), currentDrive);
                 }
 
                 WriteByte(status);
@@ -620,7 +619,7 @@ namespace FLEXNetSharp
         {
             if (c != 0x0d)
             {
-                commandFilename += (char)c;
+                commandFilename.Append((char)c);
             }
             else
             {
@@ -628,7 +627,7 @@ namespace FLEXNetSharp
 
                 try
                 {
-                    Directory.SetCurrentDirectory(commandFilename);
+                    Directory.SetCurrentDirectory(commandFilename.ToString());
                     status = 0x06;
 
                     currentWorkingDirectory = Directory.GetCurrentDirectory();
@@ -726,7 +725,7 @@ namespace FLEXNetSharp
                 }
             }
         }
-        private void StateConnectionStateDeleteGetFilename(int c)
+        private void StateConnectionStateDeleteGetFileName(int c)
         {
             //    if (c != 0x0d)
             //        commandFilename[nCommandFilenameIndex++] = c;
@@ -1326,7 +1325,6 @@ namespace FLEXNetSharp
             else if (c == '?')
             {
                 // Query Current Directory
-
                 SetAttribute((int)ConsoleAttribute.Reverse);
                 Console.Write(currentWorkingDirectory);
                 SetAttribute((int)ConsoleAttribute.Normal);
@@ -1367,21 +1365,21 @@ namespace FLEXNetSharp
             }
             else if (c == 'M')          // Mount drive image
             {
-                commandFilename = "";
+                commandFilename = new StringBuilder();
                 State = ConnectionState.MountGetfilename;
             }
             else if (c == 'D')
             {
                 // Delete file command
 
-                commandFilename = "";
+                commandFilename = new StringBuilder();
                 State = ConnectionState.DeleteGetfilename;
             }
             else if (c == 'A')
             {
                 // Dir file command
 
-                commandFilename = "";
+                commandFilename = new StringBuilder();
                 State = ConnectionState.DirGetfilename;
             }
             else if (c == 'I')
@@ -1392,14 +1390,13 @@ namespace FLEXNetSharp
             {
                 // Change Directory
 
-                commandFilename = "";
+                commandFilename = new StringBuilder();
                 State = ConnectionState.CdGetfilename;
             }
             else if (c == 'V')
             {
                 // Change Drive (and optionally the directory)
-
-                commandFilename = "";
+                commandFilename = new StringBuilder();
                 State = ConnectionState.DriveGetfilename;
             }
             else if (c == 'C')
@@ -1450,7 +1447,7 @@ namespace FLEXNetSharp
             }
             else if (c == 'm')      // Mount drive image with drive
             {
-                commandFilename = "";
+                commandFilename = new StringBuilder();
                 State = ConnectionState.GetMountDrive;
             }
             else if (c == 'd')      // Report which disk image is mounted to requested drive
@@ -1560,7 +1557,7 @@ namespace FLEXNetSharp
                             break;
 
                         case ConnectionState.DeleteGetfilename:
-                            StateConnectionStateDeleteGetFilename(c);
+                            StateConnectionStateDeleteGetFileName(c);
                             break;
 
                         case ConnectionState.DirGetfilename:
@@ -1596,6 +1593,7 @@ namespace FLEXNetSharp
                 }
                 catch (Exception e)
                 {
+                    Console.WriteLine("Terminating connection due to error below");
                     Console.WriteLine(e);
                     done = true;
                 }
