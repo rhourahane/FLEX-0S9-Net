@@ -1,0 +1,16 @@
+{
+  "Ports": [
+    {
+      "Num": "6",
+      "Rate": "115200",
+      "Verbose": "false",
+      "AutoMount": "false",
+      "AutoShutdown": "true",
+      "DefaultDirectory": "C:\\Users\\Robin\\Source\\Repos\\FLEX-0S9-Net\\DISKS\\",
+      "ImageFiles": [
+        "",
+        "FLEXNET"
+      ]
+    }
+  ]
+}

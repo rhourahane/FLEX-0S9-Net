@@ -1,4 +1,11 @@
 # FLEX-0S9-Net
-This is a copy of the code from http://www.evenson-consulting.com/swtpc/downloads/FLEX-OS9-Net.zip 
+This a copy of the code from http://www.swtpcemu.com/swtpc/downloads/FLEX-OS9-Net.zip.
 
-I'm building it with VisualStudio 2022 (Version 17.7.3) so I can use it with my Microbox 2K2 computer. I intend to clean up the code and possibly give it a GUI but none of this might happen.
+I have updated the code for the following
+- Bring code more inline with C# coding style.
+- Remove commented out console interaction code
+- Use threads rather than busy waiting
+- Upgrade to .NET 6 & VS2022
+- Allow config file to be specified on command line
+- Use JSON config files and standard config libraries
+- Allow specifying com device to allow running on Linux
