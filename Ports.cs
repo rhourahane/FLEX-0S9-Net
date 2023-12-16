@@ -227,7 +227,7 @@ namespace FLEXNetSharp
             serialBuffer[0] = byteToWrite;
             sp.Write(serialBuffer, 0, 1);
 
-            if (displayOnScreen)
+            if (displayOnScreen && verbose)
             {
                 SetAttribute((int)ConsoleAttribute.Reverse);
                 Console.Write("{0:X2} ", byteToWrite);
@@ -263,6 +263,11 @@ namespace FLEXNetSharp
 
         private void DisplayState(ConnectionState displayState)
         {
+            if (!verbose)
+            {
+                return;
+            }
+
             switch (displayState)
             {
                 case ConnectionState.NotConnected:
@@ -437,9 +442,12 @@ namespace FLEXNetSharp
             // Report which disk image is mounted to requested drive
             currentDrive = c;
 
-            SetAttribute((int)ConsoleAttribute.Reverse);
-            Console.WriteLine(currentWorkingDirectory);
-            SetAttribute((int)ConsoleAttribute.Normal);
+            if (verbose)
+            {
+                SetAttribute((int)ConsoleAttribute.Reverse);
+                Console.WriteLine(currentWorkingDirectory);
+                SetAttribute((int)ConsoleAttribute.Normal);
+            }
 
             if (imageFile[currentDrive].driveInfo.MountedFilename != null)
             {
@@ -488,7 +496,11 @@ namespace FLEXNetSharp
 
             if (imageFile[currentDrive].driveInfo.Mode == SectorAccessMode.S_MODE)
             {
-                Console.WriteLine("\r\nState is SENDING_SECTOR");
+                if (verbose)
+                {
+                    Console.WriteLine("\r\nState is SENDING_SECTOR");
+                }
+
                 SendSector();
                 State = ConnectionState.WaitAck;
             }
@@ -596,7 +608,11 @@ namespace FLEXNetSharp
                 byte status = 0x06;
                 if (commandFilename.Length > 0)
                 {
-                    Console.WriteLine();
+                    if (verbose)
+                    {
+                        Console.WriteLine();
+                    }
+
                     status = MountImageFile(commandFilename.ToString(), currentDrive);
                 }
 
@@ -639,9 +655,12 @@ namespace FLEXNetSharp
                     status = 0x15;
                 }
 
-                SetAttribute((int)ConsoleAttribute.Reverse);
-                Console.Write("{0:X2} ", status);
-                SetAttribute((int)ConsoleAttribute.Normal);
+                if (verbose)
+                {
+                    SetAttribute((int)ConsoleAttribute.Reverse);
+                    Console.Write("{0:X2} ", status);
+                    SetAttribute((int)ConsoleAttribute.Normal);
+                }
 
                 State = ConnectionState.Connected;
             }
@@ -817,7 +836,10 @@ namespace FLEXNetSharp
                         imageFile[nDrive].fileFormat = GetFileFormat(imageFile[nDrive].stream);
                         imageFile[nDrive].readOnly = true;
 
-                        Console.WriteLine("Mounting {0} readonly", fileToLoad);
+                        if (verbose)
+                        {
+                            Console.WriteLine("Mounting {0} readonly", fileToLoad);
+                        }
                     }
                     catch (Exception eIn)
                     {
@@ -907,7 +929,10 @@ namespace FLEXNetSharp
                     }
                 }
 
-                Console.WriteLine(Message);
+                if (verbose)
+                {
+                    Console.WriteLine(Message);
+                }
             }
             catch (Exception e)
             {
@@ -950,7 +975,10 @@ namespace FLEXNetSharp
 
                             lSectorOffset = lOffsetToStartOfTrack + lOffsetFromTrackStartToSector;
 
-                            Console.Write("[{0:X8}]", lSectorOffset.ToString("X8"));
+                            if (verbose)
+                            {
+                                Console.Write("[{0:X8}]", lSectorOffset.ToString("X8"));
+                            }
                         }
                         break;
 
@@ -983,7 +1011,11 @@ namespace FLEXNetSharp
                                 Console.WriteLine(e);
                                 string message = e.Message;
                             }
-                            Console.Write("[{0:X8}]", lSectorOffset);
+
+                            if (verbose)
+                            {
+                                Console.Write("[{0:X8}]", lSectorOffset);
+                            }
                         }
                         break;
                 }
@@ -1011,7 +1043,10 @@ namespace FLEXNetSharp
                 }
 
                 lSectorOffset = ((imageFile[currentDrive].driveInfo.LogicalSectorSize + 1) * 256) * (imageFile[currentDrive].track * 256 + imageFile[currentDrive].sector);
-                Console.Write("[{0:X8}]", lSectorOffset);
+                if (verbose)
+                {
+                    Console.Write("[{0:X8}]", lSectorOffset);
+                }
             }
 
             return (lSectorOffset);
@@ -1255,10 +1290,13 @@ namespace FLEXNetSharp
 
                 var topLine = string.Format("\r\nVolume in Drive {0} is {1}", driveName, volumeLabel);
                 stringWriter.Write(topLine);
-                Console.WriteLine(topLine);
-
                 stringWriter.Write(currentWorkingDirectory + "\r\n\r\n");
-                Console.WriteLine(currentWorkingDirectory);
+
+                if (verbose)
+                {
+                    Console.WriteLine(topLine);
+                    Console.WriteLine(currentWorkingDirectory);
+                }
 
                 // get the list of directories in the current working directory
                 string[] files = Directory.GetDirectories(currentWorkingDirectory);
@@ -1315,9 +1353,12 @@ namespace FLEXNetSharp
 
             if (c == 'U')
             {
-                SetAttribute((int)ConsoleAttribute.Reverse);
-                Console.Write("{0:X2} ", c);
-                SetAttribute((int)ConsoleAttribute.Normal);
+                if (verbose)
+                {
+                    SetAttribute((int)ConsoleAttribute.Reverse);
+                    Console.Write("{0:X2} ", c);
+                    SetAttribute((int)ConsoleAttribute.Normal);
+                }
 
                 State = ConnectionState.Syncronizing;
                 WriteByte(0x55);
@@ -1325,10 +1366,12 @@ namespace FLEXNetSharp
             else if (c == '?')
             {
                 // Query Current Directory
-                SetAttribute((int)ConsoleAttribute.Reverse);
-                Console.Write(currentWorkingDirectory);
-                SetAttribute((int)ConsoleAttribute.Normal);
-                Console.Write("\n");
+                if (verbose)
+                {
+                    SetAttribute((int)ConsoleAttribute.Reverse);
+                    Console.WriteLine(currentWorkingDirectory);
+                    SetAttribute((int)ConsoleAttribute.Normal);
+                }
 
                 sp.Write(currentWorkingDirectory);
                 WriteByte(0x0D, false);
@@ -1470,7 +1513,7 @@ namespace FLEXNetSharp
                 if (State != ConnectionState.Connected)
                     State = ConnectionState.Connected;
 
-                if (c != 0x20)
+                if (c != 0x20 && verbose)
                 {
                     SetAttribute((int)ConsoleAttribute.Reverse);
                     Console.Write("\n State is reset to CONNECTED - Unknown command recieved [{0:X2}]", c);
@@ -1497,7 +1540,8 @@ namespace FLEXNetSharp
                     }
 
                     if ((State != ConnectionState.ReceivingSector) &&
-                        (State != ConnectionState.GetCrc))
+                        (State != ConnectionState.GetCrc) &&
+                        verbose)
                     {
                         Console.Write("{0:X2} ", c);
                     }
